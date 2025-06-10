@@ -48,10 +48,18 @@ def create_simple_ico(ico_path, sizes=[16, 32, 48, 64, 128, 256]):
         # 保存为ICO文件
         images[0].save(
             ico_path, 
-            format='ICO', 
+            format='ICO',
             sizes=[(img.width, img.height) for img in images],
             append_images=images[1:]
         )
+        
+        # 验证生成的文件是否为ICO格式
+        with open(ico_path, 'rb') as f:
+            header = f.read(4)
+            if header[:2] != b'\x00\x00' or header[2:4] != b'\x01\x00':
+                print(f"警告: 生成的文件可能不是有效的ICO格式")
+            else:
+                print(f"确认: 生成的文件是有效的ICO格式")
         
         print(f"成功创建图标: {ico_path}")
         return True
