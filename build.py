@@ -73,9 +73,7 @@ def build_executable():
         print("\n正在复制附加文件...")
         files_to_copy = [
             "README.md",
-            "requirements.txt",
-            "icon.ico",
-            "icon.svg"
+            "requirements.txt"
         ]
         
         for file in files_to_copy:

@@ -18,7 +18,12 @@ class PDFConverter:
         
         # 设置应用图标
         try:
-            self.root.iconbitmap("icon.ico")
+            import os
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+            if os.path.exists(icon_path):
+                self.root.iconbitmap(icon_path)
+            elif os.path.exists("icon.ico"):
+                self.root.iconbitmap("icon.ico")
         except:
             pass  # 如果图标不存在，忽略错误
         
@@ -272,7 +277,7 @@ class PDFConverter:
         output_path = os.path.join(output_dir, f"{base_name}.docx")
         
         # 创建一个新的Word文档
-        doc = docx.Document()
+        doc = Document()
         
         # 打开PDF文件
         pdf_document = fitz.open(pdf_path)
@@ -295,6 +300,7 @@ class PDFConverter:
         # 保存Word文档
         doc.save(output_path)
         pdf_document.close()
+        self.log(f"成功转换: {base_name}.pdf -> {base_name}.docx")
     
     def convert_to_txt(self, pdf_path, output_dir):
         # 获取文件名（不含扩展名）
