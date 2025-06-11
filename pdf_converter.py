@@ -6,6 +6,7 @@ import threading
 import fitz  # PyMuPDF
 from PIL import Image
 import docx
+from pdf2docx import parse
 import io
 import time
 
@@ -19,13 +20,59 @@ class PDFConverter:
         # 设置应用图标
         try:
             import os
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
-            if os.path.exists(icon_path):
-                self.root.iconbitmap(icon_path)
-            elif os.path.exists("icon.ico"):
-                self.root.iconbitmap("icon.ico")
-        except:
-            pass  # 如果图标不存在，忽略错误
+            from PIL import Image, ImageTk
+            
+            # 获取资源文件路径（兼容PyInstaller打包）
+            def get_resource_path(relative_path):
+                """获取资源文件的绝对路径，兼容开发环境和PyInstaller打包环境"""
+                try:
+                    # PyInstaller创建临时文件夹，并将路径存储在_MEIPASS中
+                    base_path = sys._MEIPASS
+                except AttributeError:
+                    # 开发环境中使用脚本所在目录
+                    base_path = os.path.dirname(os.path.abspath(__file__))
+                return os.path.join(base_path, relative_path)
+            
+            # 尝试多个可能的图标路径
+            icon_paths = [
+                get_resource_path("icon.ico"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico"),
+                "icon.ico"
+            ]
+            
+            icon_set = False
+            for icon_path in icon_paths:
+                if os.path.exists(icon_path):
+                    print(f"找到图标文件: {icon_path}")
+                    try:
+                        # 方法1: 使用iconbitmap
+                        self.root.iconbitmap(icon_path)
+                        print(f"使用iconbitmap设置图标成功: {icon_path}")
+                        
+                        # 方法2: 使用PIL加载图标并设置为PhotoImage
+                        try:
+                            icon_image = Image.open(icon_path)
+                            # 调整图标大小为32x32
+                            icon_image = icon_image.resize((32, 32), Image.Resampling.LANCZOS)
+                            icon_photo = ImageTk.PhotoImage(icon_image)
+                            self.root.iconphoto(True, icon_photo)
+                            # 保存引用防止被垃圾回收
+                            self.icon_photo = icon_photo
+                            print("使用PIL方法设置图标成功")
+                        except Exception as pil_error:
+                            print(f"PIL方法设置图标失败: {pil_error}")
+                        
+                        icon_set = True
+                        break
+                    except Exception as icon_error:
+                        print(f"设置图标失败 {icon_path}: {icon_error}")
+                        continue
+            
+            if not icon_set:
+                print("未找到可用的图标文件")
+                
+        except Exception as e:
+            print(f"设置图标时出错: {e}")
         
         self.setup_ui()
         
@@ -276,6 +323,22 @@ class PDFConverter:
         base_name = os.path.splitext(os.path.basename(pdf_path))[0]
         output_path = os.path.join(output_dir, f"{base_name}.docx")
         
+        try:
+            # 使用pdf2docx库进行转换，保持原始格式和布局
+            parse(pdf_path, output_path)
+            self.log(f"成功转换: {base_name}.pdf -> {base_name}.docx")
+        except Exception as e:
+            self.log(f"转换失败: {str(e)}")
+            # 如果pdf2docx转换失败，回退到原来的方法
+            self.log("尝试使用备用方法转换...")
+            self._convert_to_docx_fallback(pdf_path, output_dir)
+    
+    def _convert_to_docx_fallback(self, pdf_path, output_dir):
+        """备用的PDF转DOCX方法，使用原来的实现"""
+        # 获取文件名（不含扩展名）
+        base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        output_path = os.path.join(output_dir, f"{base_name}.docx")
+        
         # 创建一个新的Word文档
         doc = Document()
         
@@ -300,7 +363,7 @@ class PDFConverter:
         # 保存Word文档
         doc.save(output_path)
         pdf_document.close()
-        self.log(f"成功转换: {base_name}.pdf -> {base_name}.docx")
+        self.log(f"备用方法转换成功: {base_name}.pdf -> {base_name}.docx")
     
     def convert_to_txt(self, pdf_path, output_dir):
         # 获取文件名（不含扩展名）

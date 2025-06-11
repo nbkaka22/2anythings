@@ -5,8 +5,8 @@ a = Analysis(
     ['pdf_converter.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=[('icon.ico', '.')],
+    hiddenimports=['numpy._core._exceptions', 'numpy._core._dtype_ctypes', 'numpy._core._internal', 'numpy.core._methods', 'numpy.lib.recfunctions'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon.ico'],
+    icon=['C:\\Users\\64666\\Documents\\GitHub\\2anythings\\icon.ico'],
 )

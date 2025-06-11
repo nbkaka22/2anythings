@@ -57,11 +57,21 @@ def build_executable():
             "--onefile",   # 单文件模式
             "--clean",     # 清理临时文件
             "--noconfirm", # 不确认覆盖
+            "--hidden-import=numpy._core._exceptions",
+            "--hidden-import=numpy._core._dtype_ctypes",
+            "--hidden-import=numpy._core._internal",
+            "--hidden-import=numpy.core._methods",
+            "--hidden-import=numpy.lib.recfunctions",
+            "--add-data=icon.ico;.",  # 将图标文件添加到打包中
         ]
         
         # 如果图标存在，添加图标参数
-        if os.path.exists("icon.ico"):
-            cmd.append("--icon=icon.ico")
+        icon_path = os.path.abspath("icon.ico")
+        if os.path.exists(icon_path):
+            cmd.append(f"--icon={icon_path}")
+            print(f"使用图标文件: {icon_path}")
+        else:
+            print("警告: 未找到图标文件")
         
         # 添加主程序文件
         cmd.append("pdf_converter.py")
