@@ -23,13 +23,14 @@ class PDFToPPTConverterV2:
     def __init__(self):
         self.temp_dir = None
         
-    def convert_pdf_to_ppt(self, pdf_path: str, output_path: str = None) -> str:
+    def convert_pdf_to_ppt(self, pdf_path: str, output_path: str = None, template_path: str = None) -> str:
         """
         将PDF转换为PPT（使用图片转换方案）
         
         Args:
             pdf_path: PDF文件路径
             output_path: 输出PPT文件路径，如果为None则自动生成
+            template_path: PPT模板文件路径，如果为None则使用默认模板
             
         Returns:
             输出文件路径
@@ -45,14 +46,9 @@ class PDFToPPTConverterV2:
         self.temp_dir = tempfile.mkdtemp()
         
         try:
-            # 创建新的PPT演示文稿
+            # 创建空白PPT演示文稿
             ppt = Presentation()
-            
-            # 删除默认的空白幻灯片
-            if len(ppt.slides) > 0:
-                rId = ppt.slides._sldIdLst[0].rId
-                ppt.part.drop_rel(rId)
-                del ppt.slides._sldIdLst[0]
+            print("使用默认空白演示文稿")
             
             # 使用pdfplumber打开PDF
             with pdfplumber.open(pdf_path) as pdf:
@@ -224,19 +220,20 @@ class PDFToPPTConverterV2:
             }
 
 # 兼容性函数，保持与原版本的接口一致
-def convert_pdf_to_ppt(pdf_path: str, output_path: str = None) -> str:
+def convert_pdf_to_ppt(pdf_path: str, output_path: str = None, template_path: str = None) -> str:
     """
     PDF到PPT转换的便捷函数
     
     Args:
         pdf_path: PDF文件路径
         output_path: 输出PPT文件路径
+        template_path: PPT模板文件路径
         
     Returns:
         输出文件路径
     """
     converter = PDFToPPTConverterV2()
-    return converter.convert_pdf_to_ppt(pdf_path, output_path)
+    return converter.convert_pdf_to_ppt(pdf_path, output_path, template_path)
 
 if __name__ == "__main__":
     # 测试代码

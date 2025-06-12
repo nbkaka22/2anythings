@@ -38,12 +38,13 @@ class WordToPPTConverter:
             'body': '微软雅黑'
         }
     
-    def convert_word_to_ppt(self, word_path, output_path):
+    def convert_word_to_ppt(self, word_path, output_path, template_path=None):
         """将Word文档转换为PPT
         
         Args:
             word_path: Word文档路径
             output_path: 输出PPT路径
+            template_path: PPT模板文件路径，如果为None则使用默认模板
             
         Returns:
             输出文件路径
@@ -52,8 +53,9 @@ class WordToPPTConverter:
             # 读取Word文档
             doc = Document(word_path)
             
-            # 创建PPT演示文稿
+            # 创建空白演示文稿
             ppt = Presentation()
+            logger.info("使用默认空白样式创建PPT")
             
             # 提取Word内容
             content_blocks = self._extract_content_from_word(doc)
@@ -189,15 +191,31 @@ class WordToPPTConverter:
         if not content_blocks:
             return
         
-        # 获取内容占位符
+        # 优先查找内容占位符
         content_placeholder = None
+        
+        # 尝试多种方式查找内容占位符
         for placeholder in slide.placeholders:
-            if placeholder.placeholder_format.type == 2:  # 内容占位符
+            # 方法1：通过占位符类型查找（内容占位符）
+            if placeholder.placeholder_format.type == 2:
+                content_placeholder = placeholder
+                break
+            # 方法2：通过索引查找（通常索引1是内容占位符）
+            elif placeholder.placeholder_format.idx == 1:
                 content_placeholder = placeholder
                 break
         
+        # 如果还没找到，尝试查找任何可用的文本占位符
         if content_placeholder is None:
-            # 如果没有内容占位符，创建文本框
+            for placeholder in slide.placeholders:
+                if hasattr(placeholder, 'text_frame') and placeholder != slide.shapes.title:
+                    content_placeholder = placeholder
+                    break
+        
+        # 最后才考虑创建新文本框
+        if content_placeholder is None:
+            # 如果没有找到任何内容占位符，创建文本框
+            logger.info("未找到内容占位符，创建新文本框")
             left = Inches(0.5)
             top = Inches(1.5)
             width = Inches(9)
@@ -205,6 +223,7 @@ class WordToPPTConverter:
             textbox = slide.shapes.add_textbox(left, top, width, height)
             text_frame = textbox.text_frame
         else:
+            logger.info(f"使用默认内容占位符，类型: {content_placeholder.placeholder_format.type}, 索引: {content_placeholder.placeholder_format.idx}")
             text_frame = content_placeholder.text_frame
         
         # 优化文本布局
