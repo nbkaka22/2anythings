@@ -47,8 +47,4 @@ ERROR_MESSAGES = {
     'unknown_error': '发生未知错误'
 }
 
-# 成功消息
-SUCCESS_MESSAGES = {
-    'conversion_complete': '转换完成',
-    'files_processed': '文件处理完成'
-}
+# 成功消息已移除（未使用）

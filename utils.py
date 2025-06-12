@@ -1,10 +1,6 @@
 import os
-import sys
-import time
-import shutil
 import logging
-from datetime import datetime
-from config import ERROR_MESSAGES, SUCCESS_MESSAGES
+from config import ERROR_MESSAGES
 
 # 配置日志
 logging.basicConfig(
@@ -63,79 +59,7 @@ def ensure_dir_exists(directory):
     return True
 
 
-def get_file_size(file_path):
-    """
-    获取文件大小，返回格式化的字符串
-    """
-    try:
-        size = os.path.getsize(file_path)
-        # 转换为合适的单位
-        for unit in ['B', 'KB', 'MB', 'GB']:
-            if size < 1024.0 or unit == 'GB':
-                break
-            size /= 1024.0
-        return f"{size:.2f} {unit}"
-    except Exception as e:
-        logger.error(f"获取文件大小失败: {file_path}, 错误: {str(e)}")
-        return "未知"
-
-
-def get_file_count(directory, extension='.pdf'):
-    """
-    获取指定目录中特定扩展名的文件数量
-    """
-    try:
-        count = 0
-        for file in os.listdir(directory):
-            if file.lower().endswith(extension.lower()):
-                count += 1
-        return count
-    except Exception as e:
-        logger.error(f"获取文件数量失败: {directory}, 错误: {str(e)}")
-        return 0
-
-
-def format_time(seconds):
-    """
-    将秒数格式化为时分秒
-    """
-    if seconds < 60:
-        return f"{seconds:.1f}秒"
-    elif seconds < 3600:
-        minutes = seconds // 60
-        seconds %= 60
-        return f"{int(minutes)}分{int(seconds)}秒"
-    else:
-        hours = seconds // 3600
-        seconds %= 3600
-        minutes = seconds // 60
-        seconds %= 60
-        return f"{int(hours)}时{int(minutes)}分{int(seconds)}秒"
-
-
-def create_timestamp():
-    """
-    创建时间戳字符串，用于文件名等
-    """
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
-def check_disk_space(directory, required_mb=100):
-    """
-    检查指定目录所在磁盘的可用空间是否足够
-    """
-    try:
-        if sys.platform == 'win32':
-            free_bytes = shutil.disk_usage(directory).free
-        else:
-            stat = os.statvfs(directory)
-            free_bytes = stat.f_bavail * stat.f_frsize
-        
-        free_mb = free_bytes / (1024 * 1024)
-        return free_mb >= required_mb
-    except Exception as e:
-        logger.error(f"检查磁盘空间失败: {directory}, 错误: {str(e)}")
-        return True  # 如果检查失败，假设空间足够
+# 删除了未使用的函数: get_file_size, get_file_count, format_time, create_timestamp, check_disk_space
 
 
 def is_valid_pdf(file_path):
@@ -169,34 +93,4 @@ def get_error_message(error_code):
     return ERROR_MESSAGES.get(error_code, ERROR_MESSAGES['unknown_error'])
 
 
-def get_success_message(success_code):
-    """
-    根据成功代码获取成功消息
-    """
-    return SUCCESS_MESSAGES.get(success_code, SUCCESS_MESSAGES['conversion_complete'])
-
-
-def clean_temp_files(directory, prefix='temp_', max_age_hours=24):
-    """
-    清理临时文件
-    """
-    try:
-        current_time = time.time()
-        count = 0
-        
-        for filename in os.listdir(directory):
-            if filename.startswith(prefix):
-                file_path = os.path.join(directory, filename)
-                file_age_hours = (current_time - os.path.getctime(file_path)) / 3600
-                
-                if file_age_hours > max_age_hours:
-                    os.remove(file_path)
-                    count += 1
-        
-        if count > 0:
-            logger.info(f"已清理{count}个临时文件")
-        
-        return count
-    except Exception as e:
-        logger.error(f"清理临时文件失败: {directory}, 错误: {str(e)}")
-        return 0
+# 删除了未使用的函数: get_success_message, clean_temp_files

@@ -9,6 +9,9 @@ import docx
 from pdf2docx import parse
 import io
 import time
+from pdf_to_ppt_converter import PDFToPPTConverterV2
+from word_to_ppt_converter import WordToPPTConverter
+# OCR 功能已移除
 
 class PDFConverter:
     def __init__(self):
@@ -117,6 +120,8 @@ class PDFConverter:
         
         # 文档格式选项
         ttk.Radiobutton(self.document_formats_frame, text="Word (DOCX)", variable=self.format_var, value="docx").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(self.document_formats_frame, text="PowerPoint (PPTX)", variable=self.format_var, value="pptx").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(self.document_formats_frame, text="PPT via Word (PPTX)", variable=self.format_var, value="pptx_via_word").pack(side=tk.LEFT, padx=5)
         ttk.Radiobutton(self.document_formats_frame, text="文本 (TXT)", variable=self.format_var, value="txt").pack(side=tk.LEFT, padx=5)
         
         # 图片格式选项
@@ -125,7 +130,9 @@ class PDFConverter:
         
         # 绑定模式变更事件
         self.mode_var.trace_add("write", self.update_format_options)
+        self.format_var.trace_add("write", self.update_format_options)
         
+
         # 输出目录选择
         ttk.Label(options_frame, text="输出目录:").grid(row=2, column=0, sticky=tk.W, pady=5)
         
@@ -134,9 +141,23 @@ class PDFConverter:
         
         ttk.Button(options_frame, text="浏览", command=self.browse_output_dir).grid(row=2, column=3, padx=5, pady=5)
         
+        # PPT转换选项（仅文档模式下的PPTX格式）
+        self.ppt_options_frame = ttk.Frame(options_frame)
+        self.ppt_options_frame.grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=5)
+        self.ppt_options_frame.grid_remove()  # 默认隐藏
+        
+        # OCR 功能已移除，仅保留标准版转换器
+        self.ppt_converter_var = tk.StringVar(value="standard")
+        
+        ttk.Label(self.ppt_options_frame, text="转换模式:").pack(side=tk.LEFT, padx=(20, 5))
+        self.ppt_mode_var = tk.StringVar(value="hybrid")
+        ttk.Radiobutton(self.ppt_options_frame, text="图片模式", variable=self.ppt_mode_var, value="image").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(self.ppt_options_frame, text="文字模式", variable=self.ppt_mode_var, value="text").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(self.ppt_options_frame, text="混合模式", variable=self.ppt_mode_var, value="hybrid").pack(side=tk.LEFT, padx=5)
+        
         # DPI设置（仅图片模式）
         self.dpi_frame = ttk.Frame(options_frame)
-        self.dpi_frame.grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=5)
+        self.dpi_frame.grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=5)
         self.dpi_frame.grid_remove()  # 默认隐藏
         
         ttk.Label(self.dpi_frame, text="DPI设置:").pack(side=tk.LEFT, padx=5)
@@ -189,17 +210,41 @@ class PDFConverter:
         
     def update_format_options(self, *args):
         mode = self.mode_var.get()
+        output_format = self.format_var.get()
         
         if mode == "document":
             self.image_formats_frame.grid_remove()
             self.document_formats_frame.grid()
             self.dpi_frame.grid_remove()
-            self.format_var.set("docx")
+            
+            # 显示或隐藏PPT转换选项
+            if output_format == "pptx":
+                self.ppt_options_frame.grid()
+            else:
+                self.ppt_options_frame.grid_remove()
+                
+            if not output_format or output_format in ["png", "jpg"]:
+                self.format_var.set("docx")
         else:  # image mode
             self.document_formats_frame.grid_remove()
             self.image_formats_frame.grid()
             self.dpi_frame.grid()
-            self.format_var.set("png")
+            self.ppt_options_frame.grid_remove()
+            
+            if not output_format or output_format in ["docx", "pptx", "txt"]:
+                self.format_var.set("png")
+        
+        # PPT选项显示已在update_format_options中处理
+    
+    def update_ppt_options(self, *args):
+        """更新PPT转换选项的显示状态"""
+        mode = self.mode_var.get()
+        output_format = self.format_var.get()
+        
+        if mode == "document" and output_format == "pptx":
+            self.ppt_options_frame.grid()
+        else:
+            self.ppt_options_frame.grid_remove()
     
     def browse_file(self):
         filetypes = [("PDF文件", "*.pdf"), ("所有文件", "*.*")]
@@ -294,6 +339,10 @@ class PDFConverter:
                     if mode == "document":
                         if output_format == "docx":
                             self.convert_to_docx(pdf_file, output_dir)
+                        elif output_format == "pptx":
+                            self.convert_to_pptx(pdf_file, output_dir)
+                        elif output_format == "pptx_via_word":
+                            self.convert_to_pptx_via_word(pdf_file, output_dir)
                         elif output_format == "txt":
                             self.convert_to_txt(pdf_file, output_dir)
                     else:  # image mode
@@ -333,6 +382,7 @@ class PDFConverter:
             self.log("尝试使用备用方法转换...")
             self._convert_to_docx_fallback(pdf_path, output_dir)
     
+
     def _convert_to_docx_fallback(self, pdf_path, output_dir):
         """备用的PDF转DOCX方法，使用原来的实现"""
         # 获取文件名（不含扩展名）
@@ -388,6 +438,102 @@ class PDFConverter:
                 txt_file.write("\n\n")
         
         pdf_document.close()
+    
+    def convert_to_pptx(self, pdf_path, output_dir):
+        """将PDF转换为PowerPoint演示文稿"""
+        try:
+            # 获取文件名（不含扩展名）
+            base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+            output_path = os.path.join(output_dir, f"{base_name}.pptx")
+            
+            # 获取转换器类型和模式
+            converter_type = self.ppt_converter_var.get()
+            conversion_mode = self.ppt_mode_var.get()
+            
+            # 使用标准版转换器（图片转换）
+            converter = PDFToPPTConverterV2()
+            self.log("使用标准版转换器（图片转换方案）")
+            
+            # 执行转换
+            result_path = converter.convert_pdf_to_ppt(pdf_path, output_path)
+            
+            self.log(f"成功转换: {base_name}.pdf -> {base_name}.pptx")
+            self.log(f"输出文件: {result_path}")
+            
+        except Exception as e:
+            self.log(f"PPT转换失败: {str(e)}")
+            raise e
+    
+    def convert_to_pptx_via_word(self, pdf_path, output_dir):
+        """通过Word中转将PDF转换为PPT"""
+        import tempfile
+        import os
+        
+        # 获取文件名（不含扩展名）
+        base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        output_path = os.path.join(output_dir, f"{base_name}.pptx")
+        
+        try:
+            self.log("开始PDF→Word→PPT转换流程")
+            
+            # 步骤1: 先将PDF转换为Word
+            self.log("步骤1: 将PDF转换为Word文档")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_word_path = os.path.join(temp_dir, f"{base_name}_temp.docx")
+                
+                # 使用现有的PDF转Word方法
+                try:
+                    from pdf2docx import parse
+                    parse(pdf_path, temp_word_path)
+                    self.log("使用pdf2docx成功转换为Word")
+                except Exception as e:
+                    self.log(f"pdf2docx转换失败: {str(e)}，使用备用方法")
+                    self._convert_to_docx_fallback_for_ppt(pdf_path, temp_word_path)
+                
+                # 步骤2: 将Word转换为PPT
+                self.log("步骤2: 将Word文档转换为PPT")
+                word_to_ppt_converter = WordToPPTConverter()
+                result_path = word_to_ppt_converter.convert_word_to_ppt(temp_word_path, output_path)
+                
+                self.log(f"成功转换: {base_name}.pdf -> {base_name}.pptx (通过Word中转)")
+                self.log(f"输出文件: {result_path}")
+                
+        except Exception as e:
+            self.log(f"PDF→Word→PPT转换失败: {str(e)}")
+            raise e
+    
+    def _convert_to_docx_fallback_for_ppt(self, pdf_path, output_path):
+        """为PPT转换专用的备用PDF转DOCX方法"""
+        from docx import Document
+        import fitz
+        
+        # 创建一个新的Word文档
+        doc = Document()
+        
+        # 打开PDF文件
+        pdf_document = fitz.open(pdf_path)
+        
+        # 遍历每一页
+        for page_num in range(len(pdf_document)):
+            page = pdf_document.load_page(page_num)
+            text = page.get_text("text")
+            
+            # 如果页面有文本内容，添加到文档
+            if text.strip():
+                # 添加页面内容，不添加页码标题（为PPT转换优化）
+                paragraphs = text.split('\n')
+                for para in paragraphs:
+                    if para.strip():
+                        doc.add_paragraph(para.strip())
+                
+                # 页面之间添加分隔
+                if page_num < len(pdf_document) - 1:
+                    doc.add_page_break()
+        
+        pdf_document.close()
+        
+        # 保存Word文档
+        doc.save(output_path)
     
     def convert_to_image(self, pdf_path, output_dir, image_format, dpi):
         # 获取文件名（不含扩展名）
