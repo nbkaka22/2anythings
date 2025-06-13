@@ -15,13 +15,14 @@ import re
 from pdf_to_ppt_converter import PDFToPPTConverterV2
 from word_to_ppt_converter import WordToPPTConverter
 from utils import get_resource_path
+from pdf_operations import PDFOperations
 # OCR 功能已移除
 
 class PDFConverter:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("PDF格式转换工具")
-        self.root.geometry("800x600")
+        self.root.geometry("1024x768")
         self.root.resizable(True, True)
         
         # 设置应用图标
@@ -69,6 +70,12 @@ class PDFConverter:
         except Exception as e:
             print(f"设置图标时出错: {e}")
         
+        # 初始化PDF操作模块
+        self.pdf_operations = PDFOperations(self.root)
+        
+        # 当前模式：'convert' 或 'operation'
+        self.current_mode = 'convert'
+        
         self.setup_ui()
         
     def setup_ui(self):
@@ -76,82 +83,177 @@ class PDFConverter:
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
+        # 顶部功能按钮区域
+        top_buttons_frame = ttk.Frame(main_frame)
+        top_buttons_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # PDF转换按钮（主要功能）
+        self.pdf_convert_btn = ttk.Button(top_buttons_frame, text="PDF转换", 
+                                         style="Primary.TButton", width=15,
+                                         command=self.switch_to_convert_mode)
+        self.pdf_convert_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # PDF操作按钮（新增功能）
+        self.pdf_operation_btn = ttk.Button(top_buttons_frame, text="PDF操作", 
+                                           style="Secondary.TButton", width=15,
+                                           command=self.switch_to_operation_mode)
+        self.pdf_operation_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 主内容区域 - 使用左右分栏布局
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 左侧功能列表区域
+        self.left_frame = ttk.Frame(content_frame, width=200)
+        self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        self.left_frame.pack_propagate(False)
+        
+        # 功能列表标题
+        self.left_title_label = ttk.Label(self.left_frame, text="PDF转其他", font=("Segoe UI", 12, "bold"))
+        self.left_title_label.pack(anchor=tk.W, pady=(0, 10))
+        
+        # 功能按钮列表
+        functions = [
+            ("📄 文件转Word", "docx"),
+            ("🖼 文件转图片", "image"),
+            ("📽 文件转PPT", "pptx"),
+            ("📊 文件转Excel", "excel"),
+            ("📐 PDF转CAD", "cad"),
+            ("📝 PDF转TXT", "txt"),
+            ("🌐 PDF转HTML", "html"),
+            ("📖 PDF转长图", "long_image"),
+            ("📚 PDF转电子书", "ebook")
+        ]
+        
+        self.selected_function = tk.StringVar(value="docx")
+        self.selected_function.trace('w', self.on_function_change)
+        
+        # 转换功能按钮容器
+        self.convert_functions_frame = ttk.Frame(self.left_frame)
+        self.convert_functions_frame.pack(fill=tk.BOTH, expand=True)
+        
+        for text, value in functions:
+            btn = ttk.Radiobutton(self.convert_functions_frame, text=text, variable=self.selected_function, 
+                                value=value, style="Function.TRadiobutton")
+            btn.pack(anchor=tk.W, pady=2, padx=5)
+        
+        # PDF操作功能按钮容器
+        self.operation_functions_frame = ttk.Frame(self.left_frame)
+        
+        # PDF操作功能列表
+        operation_functions = [
+            ("🗑 删除页面", "delete_pages"),
+            ("📋 合并PDF", "merge_pdf"),
+            ("✂ 分割PDF", "split_pdf"),
+            ("🔄 旋转页面", "rotate_pages"),
+            ("📏 调整页面", "resize_pages")
+        ]
+        
+        self.selected_operation = tk.StringVar(value="delete_pages")
+        self.selected_operation.trace('w', self.on_operation_change)
+        
+        for text, value in operation_functions:
+            btn = ttk.Radiobutton(self.operation_functions_frame, text=text, variable=self.selected_operation, 
+                                value=value, style="Function.TRadiobutton")
+            btn.pack(anchor=tk.W, pady=2, padx=5)
+        
+        # 右侧操作区域
+        self.right_frame = ttk.Frame(content_frame)
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        # 转换模式的UI容器
+        self.convert_mode_frame = ttk.Frame(self.right_frame)
+        self.convert_mode_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 操作模式的UI容器
+        self.operation_mode_frame = ttk.Frame(self.right_frame)
+        
+        # 设置转换模式UI
+        self.setup_convert_mode_ui()
+        
         # 文件选择区域
-        file_frame = ttk.LabelFrame(main_frame, text="文件选择", padding="10")
-        file_frame.pack(fill=tk.X, pady=5)
+        file_frame = ttk.LabelFrame(self.convert_mode_frame, text="文件选择", padding="15")
+        file_frame.pack(fill=tk.X, pady=(0, 10))
         
-        ttk.Label(file_frame, text="选择PDF文件:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        # 文件路径输入框
+        path_frame = ttk.Frame(file_frame)
+        path_frame.pack(fill=tk.X, pady=(0, 10))
         
+        ttk.Label(path_frame, text="文件路径:").pack(anchor=tk.W, pady=(0, 5))
         self.file_path_var = tk.StringVar()
-        ttk.Entry(file_frame, textvariable=self.file_path_var, width=50).grid(row=0, column=1, padx=5, pady=5)
-        
-        ttk.Button(file_frame, text="浏览文件", command=self.browse_file).grid(row=0, column=2, padx=5, pady=5)
-        ttk.Button(file_frame, text="浏览文件夹", command=self.browse_folder).grid(row=0, column=3, padx=5, pady=5)
-        
-        # 转换选项区域
-        options_frame = ttk.LabelFrame(main_frame, text="转换选项", padding="10")
-        options_frame.pack(fill=tk.X, pady=5)
-        
-        # 转换模式选择
-        ttk.Label(options_frame, text="转换模式:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        
-        self.mode_var = tk.StringVar(value="document")
-        ttk.Radiobutton(options_frame, text="文档模式", variable=self.mode_var, value="document").grid(row=0, column=1, padx=5, pady=5)
-        ttk.Radiobutton(options_frame, text="图片模式", variable=self.mode_var, value="image").grid(row=0, column=2, padx=5, pady=5)
-        
-        # 输出格式选择
-        ttk.Label(options_frame, text="输出格式:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        
-        self.format_var = tk.StringVar(value="docx")
-        self.document_formats_frame = ttk.Frame(options_frame)
-        self.document_formats_frame.grid(row=1, column=1, columnspan=3, sticky=tk.W, pady=5)
-        
-        self.image_formats_frame = ttk.Frame(options_frame)
-        self.image_formats_frame.grid(row=1, column=1, columnspan=3, sticky=tk.W, pady=5)
-        self.image_formats_frame.grid_remove()  # 默认隐藏
-        
-        # 文档格式选项
-        ttk.Radiobutton(self.document_formats_frame, text="Word (DOCX)", variable=self.format_var, value="docx").pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(self.document_formats_frame, text="PowerPoint (PPTX)", variable=self.format_var, value="pptx").pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(self.document_formats_frame, text="PPT via Word (PPTX)", variable=self.format_var, value="pptx_via_word").pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(self.document_formats_frame, text="文本 (TXT)", variable=self.format_var, value="txt").pack(side=tk.LEFT, padx=5)
-        
-        # 图片格式选项
-        ttk.Radiobutton(self.image_formats_frame, text="PNG", variable=self.format_var, value="png").pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(self.image_formats_frame, text="JPG", variable=self.format_var, value="jpg").pack(side=tk.LEFT, padx=5)
-        
-        # 绑定模式变更事件
-        self.mode_var.trace_add("write", self.update_format_options)
-        self.format_var.trace_add("write", self.update_format_options)
+        path_entry = ttk.Entry(path_frame, textvariable=self.file_path_var, state="readonly")
+        path_entry.pack(fill=tk.X, pady=(0, 10))
         
 
+        
+        # 文件操作按钮
+        file_buttons_frame = ttk.Frame(file_frame)
+        file_buttons_frame.pack(fill=tk.X)
+        
+        ttk.Button(file_buttons_frame, text="添加文件", command=self.browse_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_buttons_frame, text="添加文件夹", command=self.browse_folder).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(file_buttons_frame, text="清空列表", command=self.clear_files).pack(side=tk.LEFT)
+        
+        # 转换选项区域
+        self.options_frame = ttk.LabelFrame(self.convert_mode_frame, text="转换选项", padding="15")
+        self.options_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 图片格式选项（针对转图片功能）
+        self.image_format_frame = ttk.Frame(self.options_frame)
+        self.image_format_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(self.image_format_frame, text="图片格式:").pack(anchor=tk.W)
+        
+        self.image_format_var = tk.StringVar(value="jpg")
+        ttk.Radiobutton(self.image_format_frame, text="JPG格式", variable=self.image_format_var, value="jpg").pack(anchor=tk.W, padx=20)
+        ttk.Radiobutton(self.image_format_frame, text="PNG格式", variable=self.image_format_var, value="png").pack(anchor=tk.W, padx=20)
+        
+        # PPT转换选项（针对转PPT功能）
+        self.ppt_frame = ttk.Frame(self.options_frame)
+        self.ppt_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(self.ppt_frame, text="转换PPT方式:").pack(anchor=tk.W)
+        
+        self.ppt_method_var = tk.StringVar(value="direct")
+        ttk.Radiobutton(self.ppt_frame, text="直接转换", variable=self.ppt_method_var, value="direct").pack(anchor=tk.W, padx=20)
+        ttk.Radiobutton(self.ppt_frame, text="通过Word转换", variable=self.ppt_method_var, value="via_word").pack(anchor=tk.W, padx=20)
+        
         # 输出目录选择
-        ttk.Label(options_frame, text="输出目录:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        output_frame = ttk.LabelFrame(self.convert_mode_frame, text="输出配置", padding="15")
+        output_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(output_frame, text="输出目录:").pack(anchor=tk.W, pady=(0, 5))
+        
+        dir_frame = ttk.Frame(output_frame)
+        dir_frame.pack(fill=tk.X, pady=(0, 10))
         
         self.output_dir_var = tk.StringVar()
-        ttk.Entry(options_frame, textvariable=self.output_dir_var, width=50).grid(row=2, column=1, columnspan=2, padx=5, pady=5)
+        ttk.Entry(dir_frame, textvariable=self.output_dir_var, width=40).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(dir_frame, text="浏览", command=self.browse_output_dir).pack(side=tk.RIGHT)
         
-        ttk.Button(options_frame, text="浏览", command=self.browse_output_dir).grid(row=2, column=3, padx=5, pady=5)
+        # 兼容性变量（保持原有功能）
+        self.mode_var = tk.StringVar(value="document")
+        self.format_var = tk.StringVar(value="docx")
         
-        # PPT转换选项（仅文档模式下的PPTX格式）
-        self.ppt_options_frame = ttk.Frame(options_frame)
-        self.ppt_options_frame.grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=5)
-        self.ppt_options_frame.grid_remove()  # 默认隐藏
+        # 开始转换按钮
+        convert_frame = ttk.Frame(output_frame)
+        convert_frame.pack(fill=tk.X, pady=(10, 0))
         
-        self.ppt_mode_var = tk.StringVar(value="image")  # 保留变量以兼容现有代码
+        ttk.Button(convert_frame, text="开始转换", command=self.start_conversion, 
+                  style="Convert.TButton", width=20).pack(anchor=tk.CENTER)
         
-        # DPI设置（图片转换固定使用200 DPI以保证质量）
-        self.dpi_var = tk.StringVar(value="200")  # 保留变量以兼容现有代码，固定使用200 DPI
+
         
-        # 转换按钮区域
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=10)
+        # 初始化时调用一次功能变化处理
+        self.on_function_change()
         
-        ttk.Button(button_frame, text="开始转换", command=self.start_conversion, style="Accent.TButton").pack(side=tk.RIGHT, padx=5)
+        # 底部进度和日志区域
+        bottom_frame = ttk.Frame(main_frame)
+        bottom_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
         
         # 进度区域
-        progress_frame = ttk.LabelFrame(main_frame, text="转换进度", padding="10")
-        progress_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        progress_frame = ttk.LabelFrame(bottom_frame, text="转换进度", padding="10")
+        progress_frame.pack(fill=tk.X, pady=(0, 5))
         
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
@@ -164,18 +266,25 @@ class PDFConverter:
         ttk.Label(progress_frame, textvariable=self.status_var).pack(anchor=tk.W, pady=5)
         
         # 日志区域
-        log_frame = ttk.LabelFrame(main_frame, text="日志", padding="10")
+        log_frame = ttk.LabelFrame(bottom_frame, text="日志", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        self.log_text = tk.Text(log_frame, height=10, wrap=tk.WORD)
+        self.log_text = tk.Text(log_frame, height=8, wrap=tk.WORD)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.config(yscrollcommand=scrollbar.set)
         
+        # 兼容性变量
+        self.ppt_mode_var = tk.StringVar(value="image")
+        self.dpi_var = tk.StringVar(value="200")
+        
         # 设置样式
         self.setup_styles()
+        
+        # 初始化为转换模式
+        self.switch_to_convert_mode()
         
     def setup_styles(self):
         style = ttk.Style()
@@ -186,8 +295,46 @@ class PDFConverter:
         except:
             pass
         
-        # 创建强调按钮样式
-        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
+        # 主要功能按钮样式
+        style.configure("Primary.TButton", 
+                       font=("Segoe UI", 11, "bold"),
+                       foreground="white",
+                       background="#0078d4")
+        
+        # 次要功能按钮样式
+        style.configure("Secondary.TButton", 
+                       font=("Segoe UI", 11),
+                       foreground="#0078d4",
+                       background="white")
+        
+        # 功能列表单选按钮样式
+        style.configure("Function.TRadiobutton", 
+                       font=("Segoe UI", 10),
+                       padding=(5, 5))
+        
+        # 转换按钮样式
+        style.configure("Convert.TButton", 
+                       font=("Segoe UI", 12, "bold"),
+                       foreground="white",
+                       background="#0078d4",
+                       padding=(10, 8))
+        
+        # 效果查看按钮样式
+        style.configure("Effect.TButton", 
+                       font=("Segoe UI", 9),
+                       foreground="#0078d4",
+                       background="#e1f5fe")
+        
+        # 拖拽区域样式
+        style.configure("Drop.TFrame", 
+                       relief="solid",
+                       borderwidth=2,
+                       background="#f8f9fa")
+        
+        style.configure("Drop.TLabel", 
+                       font=("Segoe UI", 11),
+                       foreground="#6c757d",
+                       background="#f8f9fa")
         
     def update_format_options(self, *args):
         mode = self.mode_var.get()
@@ -237,6 +384,35 @@ class PDFConverter:
         
         if output_dir:
             self.output_dir_var.set(output_dir)
+    
+    def on_function_change(self, *args):
+        """当选择的功能发生变化时调用"""
+        selected_func = self.selected_function.get()
+        
+        # 根据选择的功能显示或隐藏相应的转换选项
+        if selected_func == "docx":
+            # 文件转Word：隐藏整个转换选项区域
+            self.options_frame.pack_forget()
+        elif selected_func == "image":
+            # 文件转图片：显示转换选项区域，只显示图片格式选项
+            self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.image_format_frame.pack(fill=tk.X, pady=(0, 10))
+            self.ppt_frame.pack_forget()
+        elif selected_func == "pptx":
+            # 文件转PPT：显示转换选项区域，只显示PPT转换选项
+            self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.image_format_frame.pack_forget()
+            self.ppt_frame.pack(fill=tk.X, pady=(0, 10))
+        else:
+            # 其他功能：显示转换选项区域，隐藏所有特定选项
+            self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.image_format_frame.pack_forget()
+            self.ppt_frame.pack_forget()
+    
+    def clear_files(self):
+        """清空文件列表"""
+        self.file_path_var.set("")
+        self.log("已清空文件列表")
     
     def log(self, message, update_last_line=False):
         """记录日志信息
@@ -300,6 +476,32 @@ class PDFConverter:
         if not output_dir:
             messagebox.showerror("错误", "请选择输出目录")
             return
+        
+        # 根据选择的功能确定转换格式和模式
+        selected_func = self.selected_function.get()
+        
+        if selected_func == "docx":
+            self.format_var.set("docx")
+            self.mode_var.set("document")
+        elif selected_func == "image":
+            # 使用用户选择的图片格式
+            selected_format = self.image_format_var.get()
+            self.format_var.set(selected_format)
+            self.mode_var.set("image")
+        elif selected_func == "pptx":
+            if self.ppt_method_var.get() == "via_word":
+                self.format_var.set("pptx_via_word")
+            else:
+                self.format_var.set("pptx")
+            self.mode_var.set("document")
+        elif selected_func == "txt":
+            self.format_var.set("txt")
+            self.mode_var.set("document")
+        else:
+            # 对于其他格式，暂时使用默认的docx
+            self.format_var.set("docx")
+            self.mode_var.set("document")
+            self.log(f"功能 {selected_func} 暂未实现，使用默认的Word转换")
         
         # 确保输出目录存在
         if not os.path.exists(output_dir):
@@ -1065,6 +1267,63 @@ class PDFConverter:
         
         pdf_document.close()
         self.log_success(f"图像转换完成: {total_pages} 页已转换为 {image_format.upper()}")
+    
+    def setup_convert_mode_ui(self):
+        """设置转换模式的UI"""
+        pass  # UI已经在setup_ui中设置
+    
+    def switch_to_convert_mode(self):
+        """切换到转换模式"""
+        self.current_mode = 'convert'
+        
+        # 更新按钮样式
+        self.pdf_convert_btn.configure(style="Primary.TButton")
+        self.pdf_operation_btn.configure(style="Secondary.TButton")
+        
+        # 更新左侧标题
+        self.left_title_label.configure(text="PDF转其他")
+        
+        # 显示转换功能列表，隐藏操作功能列表
+        self.convert_functions_frame.pack(fill=tk.BOTH, expand=True)
+        self.operation_functions_frame.pack_forget()
+        
+        # 显示转换模式UI，隐藏操作模式UI
+        self.convert_mode_frame.pack(fill=tk.BOTH, expand=True)
+        self.operation_mode_frame.pack_forget()
+        
+        # 隐藏PDF操作模块的UI
+        self.pdf_operations.hide_ui()
+    
+    def switch_to_operation_mode(self):
+        """切换到操作模式"""
+        self.current_mode = 'operation'
+        
+        # 更新按钮样式
+        self.pdf_convert_btn.configure(style="Secondary.TButton")
+        self.pdf_operation_btn.configure(style="Primary.TButton")
+        
+        # 更新左侧标题
+        self.left_title_label.configure(text="PDF操作")
+        
+        # 显示操作功能列表，隐藏转换功能列表
+        self.operation_functions_frame.pack(fill=tk.BOTH, expand=True)
+        self.convert_functions_frame.pack_forget()
+        
+        # 显示操作模式UI，隐藏转换模式UI
+        self.operation_mode_frame.pack(fill=tk.BOTH, expand=True)
+        self.convert_mode_frame.pack_forget()
+        
+        # 显示PDF操作模块的UI
+        self.pdf_operations.show_ui(self.operation_mode_frame)
+        
+        # 触发操作变化以显示对应功能
+        self.on_operation_change()
+    
+    def on_operation_change(self, *args):
+        """当PDF操作功能选择改变时调用"""
+        if self.current_mode == 'operation':
+            operation = self.selected_operation.get()
+            self.pdf_operations.switch_operation(operation)
     
     def run(self):
         self.root.mainloop()
