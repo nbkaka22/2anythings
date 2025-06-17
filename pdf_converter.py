@@ -12,17 +12,28 @@ import io
 import time
 import tempfile
 import re
-from pdf_to_ppt_converter import PDFToPPTConverterV2
-from word_to_ppt_converter import WordToPPTConverter
+from typing import Dict, List, Optional
+
+# 导入工具模块
 from utils import get_resource_path
 from pdf_operations import PDFOperations
-# OCR 功能已移除
+from scripts.dependency_checker import DependencyChecker, quick_dependency_check
+
+# 导入插件系统
+from converters.converter_factory import ConverterFactory
+from converters.plugin_manager import get_plugin_manager, initialize_plugins
 
 class PDFConverter:
     def __init__(self):
+        # 在创建GUI之前进行依赖检查
+        self._check_dependencies_on_startup()
+        
+        # 初始化插件系统
+        self._initialize_plugin_system()
+        
         self.root = tk.Tk()
         self.root.title("PDF格式转换工具")
-        self.root.geometry("1024x768")
+        self.root.geometry("1024x640")
         self.root.resizable(True, True)
         
         # 设置应用图标
@@ -31,9 +42,9 @@ class PDFConverter:
             
             # 尝试多个可能的图标路径
             icon_paths = [
-                get_resource_path("icon.ico"),
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico"),
-                "icon.ico"
+                get_resource_path("assets/icon.ico"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico"),
+                "assets/icon.ico"
             ]
             
             icon_set = False
@@ -99,13 +110,13 @@ class PDFConverter:
                                            command=self.switch_to_operation_mode)
         self.pdf_operation_btn.pack(side=tk.LEFT, padx=(0, 10))
         
-        # 主内容区域 - 使用左右分栏布局
+        # 主内容区域 - 使用三栏布局：左侧功能列表、中间操作区域、右侧日志
         content_frame = ttk.Frame(main_frame)
         content_frame.pack(fill=tk.BOTH, expand=True)
         
         # 左侧功能列表区域
-        self.left_frame = ttk.Frame(content_frame, width=200)
-        self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        self.left_frame = ttk.Frame(content_frame, width=180)
+        self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
         self.left_frame.pack_propagate(False)
         
         # 功能列表标题
@@ -157,9 +168,14 @@ class PDFConverter:
                                 value=value, style="Function.TRadiobutton")
             btn.pack(anchor=tk.W, pady=2, padx=5)
         
-        # 右侧操作区域
+        # 右侧日志区域
+        self.log_frame_container = ttk.Frame(content_frame, width=300)
+        self.log_frame_container.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(8, 0))
+        self.log_frame_container.pack_propagate(False)
+        
+        # 中间操作区域（压缩空间）
         self.right_frame = ttk.Frame(content_frame)
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
         
         # 转换模式的UI容器
         self.convert_mode_frame = ttk.Frame(self.right_frame)
@@ -218,6 +234,8 @@ class PDFConverter:
         ttk.Radiobutton(self.ppt_frame, text="直接转换", variable=self.ppt_method_var, value="direct").pack(anchor=tk.W, padx=20)
         ttk.Radiobutton(self.ppt_frame, text="通过Word转换", variable=self.ppt_method_var, value="via_word").pack(anchor=tk.W, padx=20)
         
+        # OCR选项已移除
+        
         # 输出目录选择
         output_frame = ttk.LabelFrame(self.convert_mode_frame, text="输出配置", padding="15")
         output_frame.pack(fill=tk.X, pady=(0, 10))
@@ -242,39 +260,14 @@ class PDFConverter:
         ttk.Button(convert_frame, text="开始转换", command=self.start_conversion, 
                   style="Convert.TButton", width=20).pack(anchor=tk.CENTER)
         
-
+        # 用于跟踪是否上一条日志是进度信息
+        self.last_log_was_progress = False
         
         # 初始化时调用一次功能变化处理
         self.on_function_change()
         
-        # 底部进度和日志区域
-        bottom_frame = ttk.Frame(main_frame)
-        bottom_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        
-        # 进度区域
-        progress_frame = ttk.LabelFrame(bottom_frame, text="转换进度", padding="10")
-        progress_frame.pack(fill=tk.X, pady=(0, 5))
-        
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.pack(fill=tk.X, padx=5, pady=5)
-        
-        # 用于跟踪是否上一条日志是进度信息
-        self.last_log_was_progress = False
-        
-        self.status_var = tk.StringVar(value="就绪")
-        ttk.Label(progress_frame, textvariable=self.status_var).pack(anchor=tk.W, pady=5)
-        
-        # 日志区域
-        log_frame = ttk.LabelFrame(bottom_frame, text="日志", padding="10")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        self.log_text = tk.Text(log_frame, height=8, wrap=tk.WORD)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.config(yscrollcommand=scrollbar.set)
+        # 设置右侧日志区域
+        self.setup_log_area()
         
         # 兼容性变量
         self.ppt_mode_var = tk.StringVar(value="image")
@@ -285,6 +278,79 @@ class PDFConverter:
         
         # 初始化为转换模式
         self.switch_to_convert_mode()
+    
+    def setup_log_area(self):
+        """设置右侧日志区域"""
+        # 日志区域标题和控制按钮
+        log_header_frame = ttk.Frame(self.log_frame_container)
+        log_header_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(log_header_frame, text="实时日志", font=("Segoe UI", 11, "bold")).pack(side=tk.LEFT)
+        
+        # 日志控制按钮
+        log_controls_frame = ttk.Frame(log_header_frame)
+        log_controls_frame.pack(side=tk.RIGHT)
+        
+        ttk.Button(log_controls_frame, text="清空", command=self.clear_log, width=6).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(log_controls_frame, text="保存", command=self.save_log, width=6).pack(side=tk.RIGHT)
+        
+        # 日志显示区域 - 设置固定高度，不再expand
+        log_display_frame = ttk.LabelFrame(self.log_frame_container, text="", padding="5")
+        log_display_frame.pack(fill=tk.X, pady=(0, 0))
+        
+        # 创建日志文本框和滚动条 - 设置固定高度
+        self.log_text = tk.Text(log_display_frame, wrap=tk.WORD, font=("Consolas", 9), 
+                               bg="#f8f9fa", fg="#333333", relief="flat", height=24)
+        self.log_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        scrollbar = ttk.Scrollbar(log_display_frame, command=self.log_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.config(yscrollcommand=scrollbar.set)
+        
+        # 配置日志文本框的标签样式
+        self.log_text.tag_configure("info", foreground="#0066cc")
+        self.log_text.tag_configure("success", foreground="#28a745")
+        self.log_text.tag_configure("warning", foreground="#ffc107")
+        self.log_text.tag_configure("error", foreground="#dc3545")
+        self.log_text.tag_configure("timestamp", foreground="#6c757d", font=("Consolas", 8))
+        
+        # 转换进度区域（放在日志区域下面）
+        progress_frame = ttk.LabelFrame(self.log_frame_container, text="转换进度", padding="8")
+        progress_frame.pack(fill=tk.X, pady=(10, 15))
+        
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(fill=tk.X, padx=5, pady=3)
+        
+        self.status_var = tk.StringVar(value="就绪")
+        ttk.Label(progress_frame, textvariable=self.status_var).pack(anchor=tk.W, pady=3)
+        
+    def clear_log(self):
+        """清空日志"""
+        self.log_text.delete(1.0, tk.END)
+        
+    def save_log(self):
+        """保存日志到文件"""
+        try:
+            from tkinter import filedialog
+            import datetime
+            
+            # 默认文件名包含时间戳
+            default_name = f"pdf_converter_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
+                initialname=default_name,
+                title="保存日志文件"
+            )
+            
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(self.log_text.get(1.0, tk.END))
+                messagebox.showinfo("成功", f"日志已保存到：{file_path}")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存日志失败：{str(e)}")
         
     def setup_styles(self):
         style = ttk.Style()
@@ -379,6 +445,27 @@ class PDFConverter:
             if not self.output_dir_var.get():
                 self.output_dir_var.set(folder_path)
     
+    def sanitize_filename(self, filename):
+        """清理文件名中的非法字符，确保可以创建文件夹"""
+        # Windows系统不允许的字符
+        invalid_chars = r'<>:"/\|?*'
+        # 替换非法字符为下划线
+        for char in invalid_chars:
+            filename = filename.replace(char, '_')
+        
+        # 移除开头和结尾的空格和点号
+        filename = filename.strip(' .')
+        
+        # 如果文件名为空或只包含非法字符，使用默认名称
+        if not filename:
+            filename = 'converted_pdf'
+        
+        # 限制文件名长度（Windows路径限制）
+        if len(filename) > 100:
+            filename = filename[:100]
+        
+        return filename
+    
     def browse_output_dir(self):
         output_dir = filedialog.askdirectory(title="选择输出目录")
         
@@ -391,8 +478,10 @@ class PDFConverter:
         
         # 根据选择的功能显示或隐藏相应的转换选项
         if selected_func == "docx":
-            # 文件转Word：隐藏整个转换选项区域
-            self.options_frame.pack_forget()
+            # 文件转Word：显示转换选项区域（OCR选项已移除）
+            self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.image_format_frame.pack_forget()
+            self.ppt_frame.pack_forget()
         elif selected_func == "image":
             # 文件转图片：显示转换选项区域，只显示图片格式选项
             self.options_frame.pack(fill=tk.X, pady=(0, 10))
@@ -514,7 +603,7 @@ class PDFConverter:
         # 获取转换选项
         mode = self.mode_var.get()
         output_format = self.format_var.get()
-        dpi = self.dpi_var.get() if mode == "image" else None
+        dpi = int(self.dpi_var.get()) if mode == "image" else None
         
         # 在新线程中执行转换，避免UI冻结
         threading.Thread(target=self.conversion_thread, args=(input_path, output_dir, mode, output_format, dpi), daemon=True).start()
@@ -541,6 +630,49 @@ class PDFConverter:
             total_files = len(pdf_files)
             self.log(f"找到 {total_files} 个PDF文件待转换")
             
+            # 检查目标文件是否已存在
+            existing_files = []
+            for pdf_file in pdf_files:
+                base_name = os.path.splitext(os.path.basename(pdf_file))[0]
+                
+                # 根据转换格式确定输出文件路径
+                if output_format == "docx":
+                    output_path = os.path.join(output_dir, f"{base_name}.docx")
+                elif output_format in ["pptx", "pptx_via_word"]:
+                    output_path = os.path.join(output_dir, f"{base_name}.pptx")
+                elif output_format == "txt":
+                    output_path = os.path.join(output_dir, f"{base_name}.txt")
+                elif output_format in ["jpg", "png"]:
+                    # 对于图片格式，检查是否存在任何页面文件
+                    page_exists = False
+                    page_num = 1
+                    while True:
+                        page_path = os.path.join(output_dir, f"{base_name}_page{page_num}.{output_format}")
+                        if os.path.exists(page_path):
+                            page_exists = True
+                            break
+                        page_num += 1
+                        if page_num > 1000:  # 防止无限循环
+                            break
+                    if page_exists:
+                        existing_files.append(f"{base_name} (图片文件)")
+                    continue
+                else:
+                    output_path = os.path.join(output_dir, f"{base_name}.{output_format}")
+                
+                if os.path.exists(output_path):
+                    existing_files.append(os.path.basename(output_path))
+            
+            # 如果有同名文件存在，询问用户是否覆盖
+            if existing_files:
+                file_list = "\n".join(existing_files)
+                message = f"以下文件已存在：\n\n{file_list}\n\n是否要覆盖这些文件？"
+                result = messagebox.askyesno("文件已存在", message, icon="warning")
+                if not result:
+                    self.status_var.set("转换已取消")
+                    self.log("用户取消转换操作")
+                    return
+            
             # 开始转换
             successful = 0
             failed = 0
@@ -553,6 +685,7 @@ class PDFConverter:
                 try:
                     if mode == "document":
                         if output_format == "docx":
+                            # OCR选项已移除
                             self.convert_to_docx(pdf_file, output_dir)
                         elif output_format == "pptx":
                             self.convert_to_pptx(pdf_file, output_dir)
@@ -591,104 +724,26 @@ class PDFConverter:
         
         self.log("开始转换PDF到DOCX")
         
-        try:
-            # 首先检查和预处理PDF文件
-            self.log_step("步骤1", "检查PDF文件完整性")
-            if not self._check_pdf_integrity(pdf_path):
-                self.log("PDF文件检查失败，尝试修复...")
-                repaired_path = self._repair_pdf_for_conversion(pdf_path)
-                if repaired_path:
-                    pdf_path = repaired_path
-                    self.log_success(f"PDF修复成功，使用修复后的文件: {repaired_path}")
+        # 使用工厂模式获取转换器
+        if hasattr(self, 'converter_factory') and self.converter_factory:
+            try:
+                self.log("使用工厂模式获取PDF到DOCX转换器")
+                converter = self.converter_factory.get_converter('pdf', 'docx')
+                if converter:
+                    self.log(f"找到转换器: {converter.name}")
+                    success = converter.convert(pdf_path, output_path)
+                    if success:
+                        self.log_success(f"转换完成: {base_name}.pdf -> {base_name}.docx")
+                        self.log(f"输出文件: {output_path}")
+                        return output_path
+                    else:
+                        self.log_error("转换器执行失败", None)
                 else:
-                    self.log("PDF修复失败，继续使用原文件")
-            
-            # 使用pdf2docx库进行转换，保持原始格式和布局
-            self.log_step("步骤2", "使用pdf2docx转换")
-            self.log("转换参数: multi_processing=False, cpu_count=1")
-            
-            # 确保输出目录存在
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
-            # 获取页面总数用于进度显示
-            try:
-                import fitz
-                doc = fitz.open(pdf_path)
-                total_pages = len(doc)
-                doc.close()
-                self.log(f"PDF总页数: {total_pages}")
-            except:
-                total_pages = 0
-            
-            # 添加更详细的参数配置来处理问题PDF
-            # 由于pdf2docx不支持进度回调，我们使用线程来模拟进度显示
-            import threading
-            import time
-            
-            conversion_complete = threading.Event()
-            
-            def progress_updater():
-                """在转换过程中模拟进度更新"""
-                if total_pages > 0:
-                    # 模拟进度更新，每秒更新一次
-                    progress_step = max(1, total_pages // 20)  # 分20步显示
-                    current_progress = 0
-                    
-                    while not conversion_complete.is_set() and current_progress < total_pages:
-                        time.sleep(1)  # 每秒更新一次
-                        current_progress = min(current_progress + progress_step, total_pages)
-                        if not conversion_complete.is_set():
-                            self.log_progress(current_progress, total_pages, f"转换页面 {current_progress}")
-            
-            # 启动进度更新线程
-            if total_pages > 0:
-                progress_thread = threading.Thread(target=progress_updater, daemon=True)
-                progress_thread.start()
-            
-            try:
-                parse(pdf_path, output_path, 
-                      start=0, end=None,  # 转换所有页面
-                      pages=None,         # 不指定特定页面
-                      password=None,      # 无密码
-                      multi_processing=False,  # 禁用多进程避免某些错误
-                      cpu_count=1)        # 使用单核处理
-            finally:
-                # 标记转换完成，停止进度更新
-                conversion_complete.set()
-                if total_pages > 0:
-                    # 显示最终进度
-                    self.log_progress(total_pages, total_pages, "转换完成")
-            
-            # 验证文件是否成功创建
-            if os.path.exists(output_path):
-                self.log_success(f"转换成功: {base_name}.pdf -> {base_name}.docx")
-                self.log(f"输出文件大小: {os.path.getsize(output_path)} 字节")
-            else:
-                raise FileNotFoundError(f"转换完成但输出文件未找到: {output_path}")
-            
-        except Exception as e:
-            error_msg = str(e)
-            self.log_error(f"pdf2docx转换失败", e)
-            
-            # 检查是否是已知的bandwriter错误
-            if "Invalid bandwriter header dimensions" in error_msg or "bandwriter" in error_msg:
-                self.log("检测到bandwriter错误，这通常是由于PDF中包含无效尺寸的图像导致")
-                self.log_fallback("使用高级修复方法")
-                
-                # 尝试使用PyMuPDF修复PDF
-                if self._fix_bandwriter_error(pdf_path, output_path):
-                    self.log_success(f"bandwriter错误修复成功: {base_name}.pdf -> {base_name}.docx")
-                    return
-                
-                # 如果修复失败，尝试逐页转换
-                self.log_fallback("尝试逐页转换来跳过问题页面")
-                if self._try_page_by_page_conversion(pdf_path, output_path):
-                    self.log_success(f"页面范围转换成功: {base_name}.pdf -> {base_name}.docx")
-                    return
-            
-            # 如果pdf2docx转换失败，回退到原来的方法
-            self.log_step("步骤3", "使用备用方法转换")
-            self._convert_to_docx_fallback(pdf_path, output_dir)
+                    self.log_error("未找到支持PDF到DOCX转换的转换器", None)
+            except Exception as e:
+                self.log_error(f"工厂模式转换出错: {e}", e)
+        
+        raise Exception("没有可用的PDF转DOCX转换器")
     
     def _check_pdf_integrity(self, pdf_path):
         """检查PDF文件的完整性，特别是查找可能导致bandwriter错误的问题"""
@@ -1104,15 +1159,26 @@ class PDFConverter:
             
             self.log_step("PPT转换", f"开始转换 {base_name}.pdf")
             
-            # 使用图片转换方案
-            converter = PDFToPPTConverterV2()
-            self.log("使用图片转换方案，完美保留PDF原始视觉效果")
+            # 使用工厂模式获取转换器
+            if hasattr(self, 'converter_factory') and self.converter_factory:
+                try:
+                    self.log("使用工厂模式获取PDF到PPT转换器")
+                    converter = self.converter_factory.get_converter('pdf', 'pptx')
+                    if converter:
+                        self.log(f"找到转换器: {converter.name}")
+                        success = converter.convert(pdf_path, output_path)
+                        if success:
+                            self.log_success(f"转换完成: {base_name}.pdf -> {base_name}.pptx")
+                            self.log(f"输出文件: {output_path}")
+                            return output_path
+                        else:
+                            self.log_error("转换器执行失败", None)
+                    else:
+                        self.log_error("未找到支持PDF到PPT转换的转换器", None)
+                except Exception as e:
+                    self.log_error(f"工厂模式转换出错: {e}", e)
             
-            # 执行转换（不使用模板）
-            result_path = converter.convert_pdf_to_ppt(pdf_path, output_path, None)
-            
-            self.log_success(f"转换完成: {base_name}.pdf -> {base_name}.pptx")
-            self.log(f"输出文件: {result_path}")
+            raise Exception("没有可用的PDF转PPT转换器")
             
         except Exception as e:
             self.log_error(f"PPT转换失败", e)
@@ -1174,10 +1240,27 @@ class PDFConverter:
                 
                 # 步骤2: 将Word转换为PPT
                 self.log_step("步骤2", "将Word文档转换为PPT")
-                word_to_ppt_converter = WordToPPTConverter()
                 
-                # 执行Word到PPT的转换（不使用模板）
-                result_path = word_to_ppt_converter.convert_word_to_ppt(temp_word_path, output_path, None)
+                # 使用工厂模式进行Word到PPT转换
+                if hasattr(self, 'converter_factory') and self.converter_factory:
+                    try:
+                        self.log("使用工厂模式获取Word到PPT转换器")
+                        word_converter = self.converter_factory.get_converter('docx', 'pptx')
+                        if word_converter:
+                            self.log(f"找到Word转换器: {word_converter.name}")
+                            word_to_ppt_success = word_converter.convert(temp_word_path, output_path)
+                            if word_to_ppt_success:
+                                self.log("Word到PPT转换成功")
+                                result_path = output_path
+                            else:
+                                raise Exception("Word到PPT转换失败")
+                        else:
+                            raise Exception("未找到支持Word到PPT转换的转换器")
+                    except Exception as e:
+                        self.log_error(f"Word到PPT转换出错: {e}", e)
+                        raise e
+                else:
+                    raise Exception("转换器工厂未初始化")
                 
                 self.log_success(f"转换完成: {base_name}.pdf -> {base_name}.pptx (通过Word中转)")
                 self.log(f"输出文件: {result_path}")
@@ -1230,7 +1313,15 @@ class PDFConverter:
         # 获取文件名（不含扩展名）
         base_name = os.path.splitext(os.path.basename(pdf_path))[0]
         
+        # 清理文件名中的非法字符，确保可以创建文件夹
+        safe_folder_name = self.sanitize_filename(base_name)
+        
+        # 创建以PDF文件名命名的文件夹
+        pdf_output_dir = os.path.join(output_dir, safe_folder_name)
+        os.makedirs(pdf_output_dir, exist_ok=True)
+        
         self.log_step("图像转换", f"开始转换 {base_name}.pdf 为 {image_format.upper()} (DPI: {dpi})")
+        self.log(f"图片将保存到文件夹: {safe_folder_name}")
         
         # 打开PDF文件
         pdf_document = fitz.open(pdf_path)
@@ -1254,8 +1345,8 @@ class PDFConverter:
                 # 将像素图转换为PIL图像
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 
-                # 保存图像
-                output_path = os.path.join(output_dir, f"{base_name}_page{page_num + 1}.{image_format}")
+                # 保存图像到PDF文件名命名的文件夹中
+                output_path = os.path.join(pdf_output_dir, f"{base_name}_page{page_num + 1}.{image_format}")
                 
                 if image_format.lower() == "jpg":
                     img.save(output_path, "JPEG", quality=95)
@@ -1315,9 +1406,8 @@ class PDFConverter:
         
         # 显示PDF操作模块的UI
         self.pdf_operations.show_ui(self.operation_mode_frame)
-        
-        # 触发操作变化以显示对应功能
-        self.on_operation_change()
+    
+    # _convert_to_docx_with_ocr方法已移除（OCR功能已删除）
     
     def on_operation_change(self, *args):
         """当PDF操作功能选择改变时调用"""
@@ -1325,10 +1415,119 @@ class PDFConverter:
             operation = self.selected_operation.get()
             self.pdf_operations.switch_operation(operation)
     
+    def _check_dependencies_on_startup(self):
+        """应用启动时的依赖检查"""
+        try:
+            checker = DependencyChecker()
+            
+            # 执行快速检查（不显示详细报告）
+            all_deps_ok = checker.check_all(verbose=False)
+            
+            if not all_deps_ok:
+                # 获取缺失的依赖
+                missing = checker.get_missing_dependencies()
+                
+                # 构建警告消息
+                warning_msg = "⚠️ 检测到缺失的依赖项:\n\n"
+                
+                if missing['python']:
+                    warning_msg += "Python包缺失:\n"
+                    for pkg in missing['python']:
+                        warning_msg += f"  • {pkg}\n"
+                    warning_msg += "\n解决方案: pip install -r requirements.txt\n\n"
+                
+                if missing['system']:
+                    warning_msg += "系统依赖缺失:\n"
+                    for dep in missing['system']:
+                        warning_msg += f"  • {dep}\n"
+                    warning_msg += "\n解决方案: 运行 python scripts/setup.py\n\n"
+                
+                warning_msg += "应用程序将继续运行，但某些功能可能不可用。\n"
+                warning_msg += "建议安装缺失的依赖以获得完整功能。"
+                
+                # 显示警告对话框（延迟到GUI创建后）
+                self._show_dependency_warning = warning_msg
+            else:
+                self._show_dependency_warning = None
+                
+        except Exception as e:
+            print(f"依赖检查时出错: {e}")
+            self._show_dependency_warning = None
+    
+    def _initialize_plugin_system(self):
+        """初始化插件系统"""
+        try:
+            print("正在初始化插件系统...")
+            
+            # 初始化插件管理器
+            self.plugin_manager = get_plugin_manager()
+            
+            # 加载所有插件
+            loaded_count = initialize_plugins()
+            print(f"插件系统初始化完成，成功加载 {loaded_count} 个插件")
+            
+            # 初始化转换器工厂（工厂会自动注册内置转换器和插件转换器）
+            self.converter_factory = ConverterFactory.get_instance()
+            
+            print(f"转换器工厂初始化完成，注册了 {len(self.converter_factory.get_all_converters())} 个转换器")
+            
+            # 获取支持的格式信息
+            self.supported_formats = self.converter_factory.get_supported_formats()
+            print(f"支持的输入格式: {self.supported_formats['input']}")
+            print(f"支持的输出格式: {self.supported_formats['output']}")
+            
+        except Exception as e:
+            print(f"插件系统初始化失败: {e}")
+            # 创建空的工厂作为后备
+            self.converter_factory = ConverterFactory()
+            self.plugin_manager = None
+            self.supported_formats = {'input': ['pdf'], 'output': ['docx', 'pptx']}
+    
+    def _show_startup_warnings(self):
+        """显示启动时的警告信息"""
+        if hasattr(self, '_show_dependency_warning') and self._show_dependency_warning:
+            # 延迟显示警告，确保GUI已完全加载
+            self.root.after(1000, lambda: messagebox.showwarning(
+                "依赖检查警告", 
+                self._show_dependency_warning
+            ))
+    
     def run(self):
+        # 显示启动警告（如果有）
+        self._show_startup_warnings()
         self.root.mainloop()
 
 
+def main():
+    """主函数 - 包含完整的依赖检查和错误处理"""
+    try:
+        # 执行详细的依赖检查
+        print("🚀 启动PDF转换器...")
+        print("📋 正在检查依赖项...")
+        
+        checker = DependencyChecker()
+        deps_ok = checker.check_all(verbose=True)
+        
+        if not deps_ok:
+            print("\n⚠️  发现缺失的依赖项，但应用程序将继续运行。")
+            print("💡 建议运行 'python scripts/setup.py' 进行自动安装。")
+            
+            # 询问用户是否继续
+            response = input("\n是否继续启动应用程序? (y/n): ")
+            if response.lower() != 'y':
+                print("应用程序启动已取消。")
+                return
+        
+        print("\n🎉 启动应用程序...")
+        app = PDFConverter()
+        app.run()
+        
+    except KeyboardInterrupt:
+        print("\n用户中断，应用程序退出。")
+    except Exception as e:
+        print(f"\n❌ 应用程序启动失败: {e}")
+        print("💡 请检查依赖安装或运行 'python scripts/setup.py'")
+
+
 if __name__ == "__main__":
-    app = PDFConverter()
-    app.run()
+    main()

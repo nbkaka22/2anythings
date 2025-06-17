@@ -1,0 +1,66 @@
+# ============================================================================
+# PDF转换器项目 Conda环境配置文件
+# ============================================================================
+# 使用方法:
+# 1. conda env create -f environment.yml
+# 2. conda activate pdf-converter
+# 3. python pdf_converter.py
+
+name: pdf-converter
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python版本
+  - python>=3.8
+  
+  # 核心PDF处理库
+  - pip
+  
+  # 系统依赖（通过conda安装，避免手动配置）
+  # tesseract已移除
+  - poppler>=22.0.0         # PDF工具集
+  
+  # 图像处理
+  - pillow>=10.0.0
+  
+  # 通过pip安装的Python包
+  - pip:
+    - pdf2docx>=0.5.8
+    - pdfplumber>=0.9.0
+    - reportlab>=4.0.0
+    - python-pptx>=0.6.21
+    # pytesseract已移除
+  # pdf2image已移除（主要用于OCR功能）
+    - python-docx>=1.1.0
+
+# ============================================================================
+# 环境管理命令
+# ============================================================================
+
+# 创建环境:
+# conda env create -f environment.yml
+
+# 激活环境:
+# conda activate pdf-converter
+
+# 更新环境:
+# conda env update -f environment.yml
+
+# 删除环境:
+# conda env remove -n pdf-converter
+
+# 导出当前环境:
+# conda env export > environment.yml
+
+# ============================================================================
+# 优势说明
+# ============================================================================
+
+# 使用conda环境的优势:
+# 1. 自动安装Poppler系统依赖
+# 2. 避免手动配置PATH环境变量
+# 3. 跨平台兼容性更好
+# 4. 依赖版本管理更精确
+# 5. 环境隔离，避免冲突

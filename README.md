@@ -58,6 +58,11 @@ pip install -r requirements.txt
 python pdf_converter.py
 ```
 
+或者运行自动安装脚本：
+```bash
+python scripts/setup.py
+```
+
 ## 使用说明
 
 ### 基本操作流程
@@ -144,29 +149,30 @@ python pdf_converter.py
 - **python-docx**: Word文档创建和编辑
 - **tkinter**: 图形用户界面（Python内置）
 
-## 故障排除
+## 使用方法
 
-### 常见问题
+1. 运行程序：
+   ```bash
+   python pdf_converter.py
+   ```
 
-**Q: 程序无法启动**
-A: 请检查Python版本是否为3.7+，并确保所有依赖库已正确安装。
+2. 在图形界面中：
+   - 选择输入文件
+   - 选择输出格式
+   - 点击"开始转换"按钮
 
-**Q: 转换失败或结果异常**
-A: 请检查PDF文件是否损坏，是否有密码保护，或者是否为扫描版PDF。
+3. 等待转换完成
 
-**Q: 内存不足错误**
-A: 尝试降低DPI设置或分批处理大文件。
+## 📚 文档
 
-**Q: 中文显示乱码**
-A: 确保系统支持UTF-8编码，或尝试更新相关字体。
+详细文档请查看 `docs/` 目录：
 
-### 获取帮助
+- [插件架构文档](docs/README_PLUGIN_ARCHITECTURE.md) - 了解插件系统的设计和使用
+- [API 文档](docs/API_DOCUMENTATION.md) - 查看详细的 API 接口说明
+- [开发指南](docs/DEVELOPMENT_GUIDE.md) - 学习如何开发和贡献代码
+- [故障排除](docs/TROUBLESHOOTING.md) - 解决常见问题和错误
 
-如果遇到其他问题，请：
-1. 查看程序日志窗口中的错误信息
-2. 检查输入文件是否正常
-3. 确认输出目录有写入权限
-4. 重启程序后重试
+
 
 ## 更新日志
 
