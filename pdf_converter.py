@@ -214,6 +214,16 @@ class PDFConverter:
         self.options_frame = ttk.LabelFrame(self.convert_mode_frame, text="转换选项", padding="15")
         self.options_frame.pack(fill=tk.X, pady=(0, 10))
         
+        # Word转换方式选项（针对转Word功能）
+        self.word_method_frame = ttk.Frame(self.options_frame)
+        self.word_method_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(self.word_method_frame, text="转换方式:").pack(anchor=tk.W)
+        
+        self.word_method_var = tk.StringVar(value="direct")
+        ttk.Radiobutton(self.word_method_frame, text="直接转换（适用于文本型PDF）", variable=self.word_method_var, value="direct").pack(anchor=tk.W, padx=20)
+        ttk.Radiobutton(self.word_method_frame, text="OCR模式（适用于扫描版PDF）", variable=self.word_method_var, value="ocr").pack(anchor=tk.W, padx=20)
+        
         # 图片格式选项（针对转图片功能）
         self.image_format_frame = ttk.Frame(self.options_frame)
         self.image_format_frame.pack(fill=tk.X, pady=(0, 10))
@@ -233,8 +243,6 @@ class PDFConverter:
         self.ppt_method_var = tk.StringVar(value="direct")
         ttk.Radiobutton(self.ppt_frame, text="直接转换", variable=self.ppt_method_var, value="direct").pack(anchor=tk.W, padx=20)
         ttk.Radiobutton(self.ppt_frame, text="通过Word转换", variable=self.ppt_method_var, value="via_word").pack(anchor=tk.W, padx=20)
-        
-        # OCR选项已移除
         
         # 输出目录选择
         output_frame = ttk.LabelFrame(self.convert_mode_frame, text="输出配置", padding="15")
@@ -478,23 +486,27 @@ class PDFConverter:
         
         # 根据选择的功能显示或隐藏相应的转换选项
         if selected_func == "docx":
-            # 文件转Word：显示转换选项区域（OCR选项已移除）
+            # 文件转Word：显示转换选项区域，显示Word转换方式选项
             self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.word_method_frame.pack(fill=tk.X, pady=(0, 10))
             self.image_format_frame.pack_forget()
             self.ppt_frame.pack_forget()
         elif selected_func == "image":
             # 文件转图片：显示转换选项区域，只显示图片格式选项
             self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.word_method_frame.pack_forget()
             self.image_format_frame.pack(fill=tk.X, pady=(0, 10))
             self.ppt_frame.pack_forget()
         elif selected_func == "pptx":
             # 文件转PPT：显示转换选项区域，只显示PPT转换选项
             self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.word_method_frame.pack_forget()
             self.image_format_frame.pack_forget()
             self.ppt_frame.pack(fill=tk.X, pady=(0, 10))
         else:
             # 其他功能：显示转换选项区域，隐藏所有特定选项
             self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.word_method_frame.pack_forget()
             self.image_format_frame.pack_forget()
             self.ppt_frame.pack_forget()
     
@@ -722,19 +734,33 @@ class PDFConverter:
         # 确保路径使用正确的分隔符
         output_path = os.path.normpath(os.path.join(output_dir, f"{base_name}.docx"))
         
-        self.log("开始转换PDF到DOCX")
+        # 获取用户选择的转换方式
+        conversion_method = getattr(self, 'word_method_var', tk.StringVar(value="direct")).get()
+        
+        self.log(f"开始转换PDF到DOCX - 转换方式: {'OCR模式' if conversion_method == 'ocr' else '直接转换'}")
         
         # 使用工厂模式获取转换器
         if hasattr(self, 'converter_factory') and self.converter_factory:
             try:
-                self.log("使用工厂模式获取PDF到DOCX转换器")
-                converter = self.converter_factory.get_converter('pdf', 'docx')
+                if conversion_method == "ocr":
+                    # 使用OCR转换器
+                    self.log("使用OCR转换器处理扫描版PDF")
+                    from converters.pdf_to_docx_ocr_converter import PDFToDocxOCRConverter
+                    converter = PDFToDocxOCRConverter()
+                else:
+                    # 使用标准转换器
+                    self.log("使用标准PDF到DOCX转换器")
+                    converter = self.converter_factory.get_converter('pdf', 'docx')
+                
                 if converter:
                     self.log(f"找到转换器: {converter.name}")
                     success = converter.convert(pdf_path, output_path)
                     if success:
                         self.log_success(f"转换完成: {base_name}.pdf -> {base_name}.docx")
                         self.log(f"输出文件: {output_path}")
+                        # 清理临时文件
+                        if hasattr(converter, 'cleanup'):
+                            converter.cleanup()
                         return output_path
                     else:
                         self.log_error("转换器执行失败", None)

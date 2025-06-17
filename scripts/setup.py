@@ -155,7 +155,8 @@ class DependencyInstaller:
         # 测试Python包导入
         test_imports = [
             'pdf2docx',
-            'pdfplumber', 
+            'pdfplumber',
+        'easyocr', 
             'reportlab',
             'pptx',
             'PIL',

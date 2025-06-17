@@ -23,6 +23,7 @@ class DependencyChecker:
         self.python_dependencies = {
             'pdf2docx': 'PDF转DOCX转换',
             'pdfplumber': 'PDF文本提取',
+            'easyocr': 'OCR文字识别',
             'reportlab': 'PDF生成处理',
             'pptx': 'PowerPoint操作',
             'PIL': '图像处理',
@@ -50,9 +51,6 @@ class DependencyChecker:
             'overall_status': True
         }
         
-    # def _get_tesseract_guide(self) -> str:
-    #     """获取Tesseract安装指南 - 已移除"""
-    #     pass
             
     def _get_poppler_guide(self) -> str:
         """获取Poppler安装指南"""
