@@ -5,6 +5,7 @@
 
 import os
 import importlib
+import importlib.util
 import inspect
 from typing import Dict, List, Type, Optional, Any
 from .converter_interface import ConverterInterface, ConverterMetadata
@@ -31,6 +32,10 @@ class ConverterFactory:
         
         # 注册内置转换器
         self._register_builtin_converters()
+        
+        # 添加默认插件目录并加载插件
+        self._setup_plugin_directories()
+        self.load_plugins()
     
     def register_converter(self, 
                           converter_class_or_metadata, 
@@ -351,6 +356,18 @@ class ConverterFactory:
                         
         except Exception as e:
             logger.error(f"扫描插件目录失败 {directory}: {e}")
+    
+    def _setup_plugin_directories(self):
+        """设置插件目录"""
+        # 添加当前converters目录作为插件目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        self.add_plugin_directory(current_dir)
+        
+        # 添加其他可能的插件目录
+        project_root = os.path.dirname(current_dir)
+        plugins_dir = os.path.join(project_root, "plugins")
+        if os.path.exists(plugins_dir):
+            self.add_plugin_directory(plugins_dir)
     
     def _register_builtin_converters(self):
         """注册内置转换器"""

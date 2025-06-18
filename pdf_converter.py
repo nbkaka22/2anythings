@@ -36,6 +36,9 @@ class PDFConverter:
         self.root.geometry("1024x640")
         self.root.resizable(True, True)
         
+        # 停止转换标志
+        self.stop_conversion_flag = False
+        
         # 设置应用图标
         try:
             from PIL import Image, ImageTk
@@ -133,7 +136,8 @@ class PDFConverter:
             ("📝 PDF转TXT", "txt"),
             ("🌐 PDF转HTML", "html"),
             ("📖 PDF转长图", "long_image"),
-            ("📚 PDF转电子书", "ebook")
+            ("📚 PDF转电子书", "ebook"),
+            ("✨ PDF高清化", "upscale")
         ]
         
         self.selected_function = tk.StringVar(value="docx")
@@ -244,6 +248,17 @@ class PDFConverter:
         ttk.Radiobutton(self.ppt_frame, text="直接转换", variable=self.ppt_method_var, value="direct").pack(anchor=tk.W, padx=20)
         ttk.Radiobutton(self.ppt_frame, text="通过Word转换", variable=self.ppt_method_var, value="via_word").pack(anchor=tk.W, padx=20)
         
+        # PDF高清化选项（针对PDF高清化功能）
+        self.upscale_frame = ttk.Frame(self.options_frame)
+        self.upscale_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(self.upscale_frame, text="高清化方式:").pack(anchor=tk.W)
+        
+        self.upscale_method_var = tk.StringVar(value="anime")
+        ttk.Radiobutton(self.upscale_frame, text="动漫/插图（使用Waifu2x）", variable=self.upscale_method_var, value="anime").pack(anchor=tk.W, padx=20)
+        ttk.Radiobutton(self.upscale_frame, text="照片/写真（使用Waifu2x）", variable=self.upscale_method_var, value="photo").pack(anchor=tk.W, padx=20)
+        ttk.Radiobutton(self.upscale_frame, text="扫描文档（使用Waifu2x）", variable=self.upscale_method_var, value="document").pack(anchor=tk.W, padx=20)
+        
         # 输出目录选择
         output_frame = ttk.LabelFrame(self.convert_mode_frame, text="输出配置", padding="15")
         output_frame.pack(fill=tk.X, pady=(0, 10))
@@ -261,12 +276,23 @@ class PDFConverter:
         self.mode_var = tk.StringVar(value="document")
         self.format_var = tk.StringVar(value="docx")
         
-        # 开始转换按钮
+        # 转换控制按钮
         convert_frame = ttk.Frame(output_frame)
         convert_frame.pack(fill=tk.X, pady=(10, 0))
         
-        ttk.Button(convert_frame, text="开始转换", command=self.start_conversion, 
-                  style="Convert.TButton", width=20).pack(anchor=tk.CENTER)
+        # 按钮容器
+        button_container = ttk.Frame(convert_frame)
+        button_container.pack(anchor=tk.CENTER)
+        
+        # 开始转换按钮
+        self.start_btn = ttk.Button(button_container, text="开始转换", command=self.start_conversion, 
+                                   style="Convert.TButton", width=15)
+        self.start_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 停止转换按钮
+        self.stop_btn = ttk.Button(button_container, text="停止转换", command=self.stop_conversion, 
+                                  style="Stop.TButton", width=15, state="disabled")
+        self.stop_btn.pack(side=tk.LEFT)
         
         # 用于跟踪是否上一条日志是进度信息
         self.last_log_was_progress = False
@@ -399,6 +425,13 @@ class PDFConverter:
                        foreground="#0078d4",
                        background="#e1f5fe")
         
+        # 停止按钮样式
+        style.configure("Stop.TButton",
+                       font=("Segoe UI", 10, "bold"),
+                       padding=(10, 8),
+                       foreground="white",
+                       background="#dc3545")
+        
         # 拖拽区域样式
         style.configure("Drop.TFrame", 
                        relief="solid",
@@ -491,24 +524,35 @@ class PDFConverter:
             self.word_method_frame.pack(fill=tk.X, pady=(0, 10))
             self.image_format_frame.pack_forget()
             self.ppt_frame.pack_forget()
+            self.upscale_frame.pack_forget()
         elif selected_func == "image":
             # 文件转图片：显示转换选项区域，只显示图片格式选项
             self.options_frame.pack(fill=tk.X, pady=(0, 10))
             self.word_method_frame.pack_forget()
             self.image_format_frame.pack(fill=tk.X, pady=(0, 10))
             self.ppt_frame.pack_forget()
+            self.upscale_frame.pack_forget()
         elif selected_func == "pptx":
             # 文件转PPT：显示转换选项区域，只显示PPT转换选项
             self.options_frame.pack(fill=tk.X, pady=(0, 10))
             self.word_method_frame.pack_forget()
             self.image_format_frame.pack_forget()
             self.ppt_frame.pack(fill=tk.X, pady=(0, 10))
+            self.upscale_frame.pack_forget()
+        elif selected_func == "upscale":
+            # PDF高清化：显示转换选项区域，只显示高清化选项
+            self.options_frame.pack(fill=tk.X, pady=(0, 10))
+            self.word_method_frame.pack_forget()
+            self.image_format_frame.pack_forget()
+            self.ppt_frame.pack_forget()
+            self.upscale_frame.pack(fill=tk.X, pady=(0, 10))
         else:
             # 其他功能：显示转换选项区域，隐藏所有特定选项
             self.options_frame.pack(fill=tk.X, pady=(0, 10))
             self.word_method_frame.pack_forget()
             self.image_format_frame.pack_forget()
             self.ppt_frame.pack_forget()
+            self.upscale_frame.pack_forget()
     
     def clear_files(self):
         """清空文件列表"""
@@ -565,6 +609,15 @@ class PDFConverter:
         """显示备选方案信息"""
         self.log(f"🔄 备选方案: {message}")
     
+    def update_progress(self, current, total=None, message=""):
+        """更新进度信息（与log_progress功能相同，用于兼容性）"""
+        if total is None:
+            # 如果只传递了一个参数，假设是百分比
+            self.log(f"当前处理进度: {current}%", update_last_line=True)
+        else:
+            # 正常的current/total模式
+            self.log_progress(current, total, message)
+    
     def start_conversion(self):
         # 获取输入路径
         input_path = self.file_path_var.get()
@@ -598,6 +651,11 @@ class PDFConverter:
         elif selected_func == "txt":
             self.format_var.set("txt")
             self.mode_var.set("document")
+        elif selected_func == "upscale":
+            # PDF高清化功能
+            upscale_method = self.upscale_method_var.get()
+            self.format_var.set(f"upscale_{upscale_method}")
+            self.mode_var.set("upscale")
         else:
             # 对于其他格式，暂时使用默认的docx
             self.format_var.set("docx")
@@ -616,6 +674,13 @@ class PDFConverter:
         mode = self.mode_var.get()
         output_format = self.format_var.get()
         dpi = int(self.dpi_var.get()) if mode == "image" else None
+        
+        # 重置停止标志
+        self.stop_conversion_flag = False
+        
+        # 更新按钮状态
+        self.start_btn.config(state="disabled")
+        self.stop_btn.config(state="normal")
         
         # 在新线程中执行转换，避免UI冻结
         threading.Thread(target=self.conversion_thread, args=(input_path, output_dir, mode, output_format, dpi), daemon=True).start()
@@ -669,6 +734,9 @@ class PDFConverter:
                     if page_exists:
                         existing_files.append(f"{base_name} (图片文件)")
                     continue
+                elif output_format.startswith("upscale_"):
+                    # 对于PDF高清化，检查是否存在高清化后的PDF文件
+                    output_path = os.path.join(output_dir, f"{base_name}_upscaled.pdf")
                 else:
                     output_path = os.path.join(output_dir, f"{base_name}.{output_format}")
                 
@@ -690,6 +758,13 @@ class PDFConverter:
             failed = 0
             
             for i, pdf_file in enumerate(pdf_files):
+                # 检查是否需要停止转换
+                if self.stop_conversion_flag:
+                    self.status_var.set("转换已停止")
+                    self.log("用户停止了转换操作")
+                    self._reset_buttons()
+                    return
+                
                 file_name = os.path.basename(pdf_file)
                 self.status_var.set(f"正在转换 {file_name} ({i+1}/{total_files})")
                 # 文件级别进度显示已精简
@@ -705,6 +780,10 @@ class PDFConverter:
                             self.convert_to_pptx_via_word(pdf_file, output_dir)
                         elif output_format == "txt":
                             self.convert_to_txt(pdf_file, output_dir)
+                    elif mode == "upscale":
+                        # PDF高清化模式 - 使用插件系统
+                        upscale_method = output_format.replace("upscale_", "")
+                        self._convert_using_upscale_plugin(pdf_file, output_dir, upscale_method)
                     else:  # image mode
                         self.convert_to_image(pdf_file, output_dir, output_format, dpi)
                     
@@ -721,12 +800,25 @@ class PDFConverter:
             # 完成
             self.status_var.set(f"转换完成: {successful}成功, {failed}失败")
             self.log_success(f"批量转换完成 - 成功: {successful}, 失败: {failed}")
+            self._reset_buttons()
             messagebox.showinfo("完成", f"转换完成\n成功: {successful}\n失败: {failed}")
             
         except Exception as e:
             self.status_var.set(f"转换过程中发生错误: {str(e)}")
             self.log(f"错误: {str(e)}")
+            self._reset_buttons()
             messagebox.showerror("错误", f"转换过程中发生错误: {str(e)}")
+    
+    def stop_conversion(self):
+        """停止当前转换任务"""
+        self.stop_conversion_flag = True
+        self.status_var.set("正在停止转换...")
+        self.log("用户请求停止转换")
+    
+    def _reset_buttons(self):
+        """重置按钮状态"""
+        self.start_btn.config(state="normal")
+        self.stop_btn.config(state="disabled")
     
     def convert_to_docx(self, pdf_path, output_dir):
         # 获取文件名（不含扩展名）
@@ -736,7 +828,9 @@ class PDFConverter:
         
         # 获取用户选择的转换方式
         conversion_method = getattr(self, 'word_method_var', tk.StringVar(value="direct")).get()
-        
+# 1. 使用PyMuPDF提取PDF中的图片
+# 2. 使用Waifu2x进行图片高清化
+# 3. 将高清化后的图片重新嵌入PDF        
         self.log(f"开始转换PDF到DOCX - 转换方式: {'OCR模式' if conversion_method == 'ocr' else '直接转换'}")
         
         # 使用工厂模式获取转换器
@@ -1175,6 +1269,53 @@ class PDFConverter:
         
         pdf_document.close()
         self.log_success(f"文本转换完成: {base_name}.txt")
+    
+    def _convert_using_upscale_plugin(self, pdf_path, output_dir, upscale_method):
+        """使用插件系统进行PDF高清化处理"""
+        try:
+            # 获取转换器工厂实例
+            from converters.converter_factory import get_converter_factory
+            factory = get_converter_factory()
+            
+            # 获取PDF高清化转换器
+            upscale_converter = factory.get_converter("pdf_upscale")
+            if not upscale_converter:
+                self.log("❌ PDF高清化插件未找到")
+                return False
+            
+            # 获取文件名（不含扩展名）
+            base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+            output_path = os.path.join(output_dir, f"{base_name}_upscaled.pdf")
+            
+            self.log_step("PDF高清化", f"开始处理 {base_name}.pdf")
+            
+            # 准备转换参数
+            convert_kwargs = {
+                'upscale_method': upscale_method,
+                'progress_callback': self.update_progress,
+                'log_callback': self.log,
+                'enable_gpu': True,  # 强制启用GPU加速
+                'batch_size': 4      # GPU批处理大小
+            }
+            
+            # 执行转换
+            success = upscale_converter.convert(
+                input_path=pdf_path,
+                output_path=output_path,
+                **convert_kwargs
+            )
+            
+            if success:
+                self.log_step("完成", f"高清化完成: {os.path.basename(output_path)}")
+                self.log(f"✅ 输出文件: {output_path}")
+            else:
+                self.log("❌ PDF高清化失败")
+            
+            return success
+            
+        except Exception as e:
+            self.log_error("PDF高清化插件调用失败", e)
+            return False
     
     def convert_to_pptx(self, pdf_path, output_dir):
         """将PDF转换为PowerPoint演示文稿"""

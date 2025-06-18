@@ -38,13 +38,48 @@ class PDFToDocxOCRConverter(ConverterInterface):
         """获取OCR识别器实例（延迟初始化）"""
         if self._ocr_reader is None:
             try:
-                # 初始化EasyOCR，支持中英文
-                self._ocr_reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
-                logger.info("EasyOCR初始化成功")
+                # 检查GPU可用性
+                gpu_available = self._check_gpu_support()
+                
+                # 初始化EasyOCR，支持中英文，优先使用GPU
+                self._ocr_reader = easyocr.Reader(['ch_sim', 'en'], gpu=gpu_available)
+                
+                if gpu_available:
+                    logger.info("EasyOCR初始化成功 (GPU模式)")
+                else:
+                    logger.info("EasyOCR初始化成功 (CPU模式)")
+                    
             except Exception as e:
-                logger.error(f"EasyOCR初始化失败: {e}")
-                raise
+                # 如果GPU模式失败，尝试CPU模式
+                if gpu_available:
+                    logger.warning(f"EasyOCR GPU模式初始化失败，尝试CPU模式: {e}")
+                    try:
+                        self._ocr_reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
+                        logger.info("EasyOCR初始化成功 (CPU模式)")
+                    except Exception as e2:
+                        logger.error(f"EasyOCR初始化失败: {e2}")
+                        raise
+                else:
+                    logger.error(f"EasyOCR初始化失败: {e}")
+                    raise
         return self._ocr_reader
+    
+    def _check_gpu_support(self) -> bool:
+        """检查GPU支持情况"""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                logger.info(f"检测到CUDA GPU: {torch.cuda.get_device_name(0)}")
+                return True
+            else:
+                logger.info("未检测到CUDA GPU，将使用CPU模式")
+                return False
+        except ImportError:
+            logger.info("PyTorch未安装，将使用CPU模式")
+            return False
+        except Exception as e:
+            logger.warning(f"GPU检查失败: {e}，将使用CPU模式")
+            return False
     
     @property
     def name(self) -> str:
