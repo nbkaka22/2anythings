@@ -384,6 +384,16 @@ class ConverterFactory:
             from .word_to_ppt_converter import WordToPPTConverter
             self.register_converter(WordToPPTConverter)
             
+            # 注册PDF高清化转换器
+            try:
+                from .pdf_upscale_converter import PDFUpscaleConverter
+                self.register_converter(PDFUpscaleConverter)
+                logger.info("PDF高清化转换器注册成功")
+            except ImportError as e:
+                logger.warning(f"PDF高清化转换器导入失败，可能缺少依赖: {e}")
+            except Exception as e:
+                logger.error(f"PDF高清化转换器注册失败: {e}")
+            
             logger.info("内置转换器注册完成")
             
         except ImportError as e:

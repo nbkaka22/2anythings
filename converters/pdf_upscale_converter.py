@@ -20,6 +20,11 @@ import numpy as np
 # 导入基类
 from converters.converter_interface import ConverterInterface, ConverterMetadata
 
+# 导入新的模块化组件
+from converters.image_processing_toolkit import ImageAnalyzer, ImageProcessingPipeline
+from converters.config_manager import get_config_manager, get_processing_config
+from converters.enhancement_plugins import get_plugin_manager
+
 logger = logging.getLogger('pdf_converter')
 
 class PDFUpscaleConverter(ConverterInterface):
@@ -32,6 +37,30 @@ class PDFUpscaleConverter(ConverterInterface):
         self._temp_files = []
         self._check_dependencies()
         self._setup_gpu_environment()
+        
+        # 初始化新的模块化组件
+        self.config_manager = get_config_manager()
+        self.config = get_processing_config()
+        self.image_analyzer = ImageAnalyzer()
+        self.plugin_manager = get_plugin_manager()
+        
+        # 注册内置插件
+        self._register_builtin_plugins()
+    
+    def _register_builtin_plugins(self):
+        """注册内置的图像处理插件"""
+        from converters.enhancement_plugins import (
+            CLAHEPreprocessingPlugin, SmartSharpeningPlugin,
+            NoiseReductionPlugin, ColorEnhancementPlugin
+        )
+        
+        # 注册预处理插件
+        self.plugin_manager.register_plugin(CLAHEPreprocessingPlugin())
+        self.plugin_manager.register_plugin(SmartSharpeningPlugin())
+        
+        # 注册后处理插件
+        self.plugin_manager.register_plugin(NoiseReductionPlugin())
+        self.plugin_manager.register_plugin(ColorEnhancementPlugin())
     
     @property
     def name(self) -> str:
@@ -459,7 +488,7 @@ class PDFUpscaleConverter(ConverterInterface):
             return self._simple_upscale(image, log_callback)
     
     def _preprocess_image(self, image: Image.Image, method: str, log_callback=None) -> Image.Image:
-        """图像预处理，根据图像类型优化输入"""
+        """图像预处理，使用插件架构进行模块化处理"""
         try:
             processed_image = image.copy()
             
@@ -469,17 +498,37 @@ class PDFUpscaleConverter(ConverterInterface):
                     log_callback(f"        🔄 转换图像模式: {processed_image.mode} -> RGB")
                 processed_image = processed_image.convert('RGB')
             
-            # 根据方法进行特定预处理
+            # 使用图像分析器分析图像特征
+            features = self.image_analyzer.analyze_features(processed_image)
+            if log_callback:
+                log_callback(f"        🔍 图像分析完成: 边缘密度={features['edge_density']:.3f}, 噪声水平={features['noise_level']:.3f}")
+            
+            # 创建预处理管道
+            pipeline = ImageProcessingPipeline()
+            
+            # 根据方法和图像特征选择预处理插件
             if method == "photo":
-                # 照片类型：轻微锐化
-                processed_image = self._enhance_photo(processed_image)
+                # 照片类型预处理管道
+                if features['contrast'] < 0.5:  # 低对比度图像
+                    pipeline.add_processor(self.plugin_manager.get_plugin('clahe_preprocessing'))
+                if features['edge_density'] < 0.3:  # 需要锐化
+                    pipeline.add_processor(self.plugin_manager.get_plugin('smart_sharpening'))
                 if log_callback:
-                    log_callback(f"        📸 应用照片优化预处理")
+                    log_callback(f"        📸 应用照片优化预处理管道")
             elif method == "document":
-                # 文档类型：对比度增强
-                processed_image = self._enhance_document(processed_image)
+                # 文档类型预处理管道
+                pipeline.add_processor(self.plugin_manager.get_plugin('clahe_preprocessing'))
+                if features['noise_level'] > 0.1:  # 高噪声文档
+                    pipeline.add_processor(self.plugin_manager.get_plugin('noise_reduction'))
                 if log_callback:
-                    log_callback(f"        📄 应用文档优化预处理")
+                    log_callback(f"        📄 应用文档优化预处理管道")
+            else:
+                # 默认预处理
+                if features['contrast'] < 0.4:
+                    pipeline.add_processor(self.plugin_manager.get_plugin('clahe_preprocessing'))
+            
+            # 执行预处理管道
+            processed_image = pipeline.process(processed_image)
             
             return processed_image
             
@@ -489,101 +538,718 @@ class PDFUpscaleConverter(ConverterInterface):
             return image
     
     def _enhance_photo(self, image: Image.Image) -> Image.Image:
-        """照片类型图像增强"""
+        """照片类型图像增强 - 扩展版"""
         try:
-            from PIL import ImageEnhance
+            from PIL import ImageEnhance, ImageFilter
+            import cv2
+            import numpy as np
             
-            # 轻微锐化
-            enhancer = ImageEnhance.Sharpness(image)
-            enhanced = enhancer.enhance(1.1)
+            # 转换为numpy数组进行高级处理
+            img_array = np.array(image)
             
-            # 轻微对比度增强
+            # 1. CLAHE自适应直方图均衡化（仅对亮度通道）
+            if len(img_array.shape) == 3:
+                # 转换到LAB色彩空间
+                lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+                lab[:,:,0] = clahe.apply(lab[:,:,0])  # 只对L通道应用CLAHE
+                img_array = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+                enhanced = Image.fromarray(img_array)
+            else:
+                # 灰度图像直接应用CLAHE
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+                img_array = clahe.apply(img_array)
+                enhanced = Image.fromarray(img_array)
+            
+            # 2. 智能锐化（基于图像内容自适应）
+            enhanced = self._apply_smart_sharpening(enhanced, strength=1.1)
+            
+            # 3. 轻微对比度增强
             enhancer = ImageEnhance.Contrast(enhanced)
             enhanced = enhancer.enhance(1.05)
             
+            # 4. 色彩饱和度微调
+            enhancer = ImageEnhance.Color(enhanced)
+            enhanced = enhancer.enhance(1.02)
+            
             return enhanced
-        except:
-            return image
+        except Exception as e:
+            # 如果高级处理失败，回退到基础增强
+            try:
+                from PIL import ImageEnhance
+                enhancer = ImageEnhance.Sharpness(image)
+                enhanced = enhancer.enhance(1.1)
+                enhancer = ImageEnhance.Contrast(enhanced)
+                enhanced = enhancer.enhance(1.05)
+                return enhanced
+            except:
+                return image
     
     def _enhance_document(self, image: Image.Image) -> Image.Image:
-        """文档类型图像增强"""
+        """文档类型图像增强 - 扩展版"""
         try:
-            from PIL import ImageEnhance
+            from PIL import ImageEnhance, ImageFilter, ImageOps
+            import cv2
+            import numpy as np
             
-            # 增强对比度
-            enhancer = ImageEnhance.Contrast(image)
-            enhanced = enhancer.enhance(1.2)
+            # 转换为numpy数组
+            img_array = np.array(image)
             
-            # 增强锐度
-            enhancer = ImageEnhance.Sharpness(enhanced)
+            # 1. 文档专用CLAHE（更强的对比度增强）
+            if len(img_array.shape) == 3:
+                # 转换为灰度进行文档处理
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(16,16))
+                enhanced_gray = clahe.apply(gray)
+                # 转回RGB
+                enhanced = Image.fromarray(cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2RGB))
+            else:
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(16,16))
+                enhanced_gray = clahe.apply(img_array)
+                enhanced = Image.fromarray(enhanced_gray)
+            
+            # 2. 文档去噪（双边滤波）
+            img_array = np.array(enhanced)
+            if len(img_array.shape) == 3:
+                denoised = cv2.bilateralFilter(img_array, 9, 75, 75)
+                enhanced = Image.fromarray(denoised)
+            
+            # 3. 智能锐化（文档专用强度）
+            enhanced = self._apply_smart_sharpening(enhanced, strength=1.4)
+            
+            # 4. 强化对比度
+            enhancer = ImageEnhance.Contrast(enhanced)
             enhanced = enhancer.enhance(1.3)
             
+            # 5. 文档专用边缘增强
+            enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=1, percent=120, threshold=3))
+            
             return enhanced
-        except:
-            return image
+        except Exception as e:
+            # 回退到基础增强
+            try:
+                from PIL import ImageEnhance
+                enhancer = ImageEnhance.Contrast(image)
+                enhanced = enhancer.enhance(1.2)
+                enhancer = ImageEnhance.Sharpness(enhanced)
+                enhanced = enhancer.enhance(1.3)
+                return enhanced
+            except:
+                return image
+    
+    def _apply_smart_sharpening(self, image: Image.Image, strength: float = 1.2) -> Image.Image:
+        """智能锐化算法 - 基于图像内容自适应调整"""
+        try:
+            from PIL import ImageFilter, ImageEnhance
+            import cv2
+            import numpy as np
+            
+            # 转换为numpy数组分析图像特征
+            img_array = np.array(image)
+            
+            # 计算图像的边缘密度和噪点水平
+            if len(img_array.shape) == 3:
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = img_array
+            
+            # 1. 边缘检测评估
+            edges = cv2.Canny(gray, 50, 150)
+            edge_density = np.sum(edges > 0) / (gray.shape[0] * gray.shape[1])
+            
+            # 2. 噪点水平评估（使用拉普拉斯算子）
+            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            
+            # 3. 根据图像特征自适应调整锐化参数
+            if edge_density > 0.1:  # 高边缘密度（如文档、线条图）
+                # 使用UnsharpMask进行精确锐化
+                radius = 1.0
+                percent = int(strength * 100)
+                threshold = 2
+            elif laplacian_var < 100:  # 低对比度图像
+                # 温和锐化避免噪点放大
+                radius = 0.5
+                percent = int(strength * 80)
+                threshold = 5
+            else:  # 普通图像
+                radius = 1.5
+                percent = int(strength * 90)
+                threshold = 3
+            
+            # 应用UnsharpMask锐化
+            sharpened = image.filter(ImageFilter.UnsharpMask(
+                radius=radius, 
+                percent=percent, 
+                threshold=threshold
+            ))
+            
+            # 4. 多尺度锐化（针对不同频率的细节）
+            if strength > 1.3:  # 强锐化模式
+                # 添加高频细节增强
+                enhancer = ImageEnhance.Sharpness(sharpened)
+                sharpened = enhancer.enhance(1.1)
+            
+            return sharpened
+            
+        except Exception as e:
+            # 回退到基础锐化
+            try:
+                from PIL import ImageEnhance
+                enhancer = ImageEnhance.Sharpness(image)
+                return enhancer.enhance(strength)
+            except:
+                return image
     
     def _get_optimal_waifu2x_config(self, image: Image.Image, method: str, gpu_available: bool, log_callback=None) -> dict:
-        """根据图像特性和方法选择最优Waifu2x配置"""
+        """根据图像特性和方法选择最优Waifu2x配置 - 使用配置管理器"""
         width, height = image.size
         pixel_count = width * height
         
+        # 使用图像分析器分析图像特征
+        image_features = self.image_analyzer.analyze_features(image)
+        
+        # 从配置管理器获取基础配置
+        waifu2x_config = self.config.waifu2x
+        
         # 基础配置
         config = {
-            'tta_mode': False,
-            'num_threads': 4 if not gpu_available else 1,
-            'scale': 2
+            'tta_mode': waifu2x_config.tta_mode,
+            'num_threads': waifu2x_config.cpu_threads if not gpu_available else waifu2x_config.gpu_threads,
+            'scale': waifu2x_config.scale
         }
         
-        # 根据图像大小调整瓦片大小
+        # 智能瓦片大小选择（基于GPU内存和图像复杂度）
+        complexity_factor = image_features.get('complexity', 0.5)
+        
         if gpu_available:
-            if pixel_count > 2000000:  # 大图像
-                config['tilesize'] = 400
+            # GPU处理 - 根据图像大小和复杂度动态调整
+            if pixel_count > 4000000:  # 超大图像
+                config['tilesize'] = max(waifu2x_config.min_tilesize, 
+                                       int(waifu2x_config.gpu_tilesize_large * (1 - complexity_factor * 0.3)))
+            elif pixel_count > 2000000:  # 大图像
+                config['tilesize'] = max(waifu2x_config.min_tilesize, 
+                                       int(waifu2x_config.gpu_tilesize_medium * (1 - complexity_factor * 0.2)))
             elif pixel_count > 1000000:  # 中等图像
-                config['tilesize'] = 512
+                config['tilesize'] = max(waifu2x_config.min_tilesize, 
+                                       int(waifu2x_config.gpu_tilesize_small * (1 - complexity_factor * 0.1)))
             else:  # 小图像
-                config['tilesize'] = 640
+                config['tilesize'] = waifu2x_config.gpu_tilesize_small
         else:
-            if pixel_count > 1000000:  # CPU处理大图像
-                config['tilesize'] = 200
+            # CPU处理 - 使用配置的CPU瓦片大小
+            if pixel_count > 2000000:
+                config['tilesize'] = waifu2x_config.cpu_tilesize_large
+            elif pixel_count > 1000000:
+                config['tilesize'] = waifu2x_config.cpu_tilesize_medium
             else:
-                config['tilesize'] = 256
+                config['tilesize'] = waifu2x_config.cpu_tilesize_small
         
-        # 根据方法选择模型和降噪级别
+        # 智能模型和参数选择
+        noise_level = image_features.get('noise_level', 1)
+        edge_density = image_features.get('edge_density', 0.05)
+        
         if method == "anime":
-            config['model'] = "models-cunet"
-            config['noise'] = 2  # 动漫图像通常需要更多降噪
+            config['model'] = waifu2x_config.anime_model
+            # 动漫图像根据边缘密度调整降噪
+            if edge_density > 0.15:  # 高细节动漫
+                config['noise'] = max(1, min(3, int(noise_level * 3) + 1))
+            else:
+                config['noise'] = max(2, min(3, int(noise_level * 3) + 2))
         elif method == "photo":
-            config['model'] = "models-cunet"
-            config['noise'] = 1  # 照片适中降噪
+            config['model'] = waifu2x_config.photo_model
+            # 照片根据噪点水平智能调整
+            config['noise'] = max(0, min(3, int(noise_level * 3)))
         elif method == "document":
-            config['model'] = "models-cunet"
-            config['noise'] = 3  # 文档需要最大降噪
+            config['model'] = waifu2x_config.document_model
+            # 文档通常需要强降噪但保持文字清晰
+            config['noise'] = 3 if noise_level > 0.33 else 2
         else:
-            config['model'] = "models-cunet"
-            config['noise'] = 1  # 默认配置
+            config['model'] = waifu2x_config.anime_model  # 默认使用动漫模型
+            config['noise'] = max(1, min(3, noise_level))
         
-        # 高质量模式（对小图像启用TTA）
-        if pixel_count < 500000 and gpu_available:
-            config['tta_mode'] = True
-            if log_callback:
+        # 高质量模式条件优化
+        enable_tta = False
+        if gpu_available:
+            # 更智能的TTA启用条件
+            if pixel_count < 800000:  # 中小图像
+                if image_features.get('is_important', False):  # 重要图像
+                    enable_tta = True
+                elif edge_density > 0.1 and pixel_count < 400000:  # 高细节小图
+                    enable_tta = True
+        
+        config['tta_mode'] = enable_tta
+        
+        # 动态缩放比例选择
+        if pixel_count < 100000:  # 极小图像可以使用更高缩放
+            config['scale'] = 4 if gpu_available else 2
+        elif pixel_count > 8000000:  # 极大图像使用保守缩放
+            config['scale'] = 2
+        
+        # 日志输出优化信息
+        if log_callback:
+            if enable_tta:
                 log_callback(f"        🎯 启用高质量模式（TTA）")
+            log_callback(f"        ⚙️ 瓦片大小: {config['tilesize']}, 降噪: {config['noise']}, 缩放: {config['scale']}x")
+            if image_features.get('complexity', 0) > 0.7:
+                log_callback(f"        🔍 检测到高复杂度图像，优化处理参数")
         
         return config
     
+    # 注意：原有的 _analyze_image_features 方法已被 ImageAnalyzer 类替代
+        # 新的图像分析功能通过 self.image_analyzer.analyze_features() 调用
+    
     def _postprocess_image(self, upscaled_image: Image.Image, original_image: Image.Image, log_callback=None) -> Image.Image:
-        """后处理优化"""
+        """后处理优化 - 使用插件架构进行模块化处理"""
         try:
-            # 确保输出图像模式正确
-            if original_image.mode == 'RGBA' and upscaled_image.mode == 'RGB':
-                # 如果原图有透明通道，尝试保持
-                upscaled_image = upscaled_image.convert('RGBA')
+            # 分析原图和放大图特征
+            original_features = self.image_analyzer.analyze_features(original_image)
+            upscaled_features = self.image_analyzer.analyze_features(upscaled_image)
             
-            return upscaled_image
+            enhanced = upscaled_image
+            
+            # 1. 色彩模式处理
+            if original_image.mode == 'RGBA' and enhanced.mode == 'RGB':
+                enhanced = enhanced.convert('RGBA')
+            elif original_image.mode == 'L' and enhanced.mode == 'RGB':
+                # 如果原图是灰度，可选择保持灰度或转换为彩色
+                pass  # 保持RGB以获得更好的显示效果
+            
+            # 创建后处理管道
+            pipeline = ImageProcessingPipeline()
+            
+            # 2. 根据配置和图像特征选择后处理插件
+            config = self.config.postprocessing
+            
+            # 智能色彩校正
+            if (config.color_enhancement.enabled and 
+                original_features.get('color_richness', 0) > config.color_enhancement.min_color_richness):
+                pipeline.add_processor(self.plugin_manager.get_plugin('color_enhancement'))
+                if log_callback:
+                    log_callback(f"        🎨 添加智能色彩增强")
+            
+            # 噪点抑制（检测噪点增加）
+            noise_increased = (upscaled_features.get('noise_level', 0) > 
+                             original_features.get('noise_level', 0) * 1.2)
+            if config.noise_reduction.enabled and noise_increased:
+                pipeline.add_processor(self.plugin_manager.get_plugin('noise_reduction'))
+                if log_callback:
+                    log_callback(f"        🔇 添加噪点抑制")
+            
+            # 执行后处理管道
+            if pipeline.processors:
+                enhanced = pipeline.process(enhanced)
+                if log_callback:
+                    log_callback(f"        ✅ 后处理管道执行完成，共{len(pipeline.processors)}个步骤")
+            
+            # 最终质量验证
+            quality_score = self.image_analyzer.calculate_quality_score(enhanced)
+            if log_callback:
+                log_callback(f"        📊 最终质量评分: {quality_score:.3f}")
+            
+            return enhanced
             
         except Exception as e:
             if log_callback:
-                log_callback(f"        ⚠️ 后处理失败: {str(e)}")
-            return upscaled_image
+                log_callback(f"        ⚠️ 高级后处理失败，使用基础处理: {str(e)}")
+            # 回退到基础后处理
+            try:
+                if original_image.mode == 'RGBA' and upscaled_image.mode == 'RGB':
+                    return upscaled_image.convert('RGBA')
+                return upscaled_image
+            except:
+                return upscaled_image
+    
+    def _apply_color_enhancement(self, image: Image.Image, features: dict) -> Image.Image:
+        """智能色彩增强"""
+        try:
+            from PIL import ImageEnhance
+            import cv2
+            import numpy as np
+            
+            enhanced = image.copy()
+            color_richness = features.get('color_richness', 0)
+            
+            # 1. 自适应饱和度增强
+            if color_richness > 0.5:
+                # 高色彩丰富度：轻微增强
+                saturation_factor = 1.05 + (color_richness - 0.5) * 0.1
+            else:
+                # 低色彩丰富度：适度增强
+                saturation_factor = 1.1 + (0.5 - color_richness) * 0.2
+            
+            enhancer = ImageEnhance.Color(enhanced)
+            enhanced = enhancer.enhance(min(saturation_factor, 1.3))
+            
+            # 2. 智能白平衡校正
+            if enhanced.mode in ['RGB', 'RGBA']:
+                enhanced = self._apply_white_balance(enhanced)
+            
+            # 3. 色调映射优化
+            if color_richness > 0.4:
+                enhanced = self._apply_tone_mapping(enhanced)
+            
+            return enhanced
+            
+        except Exception:
+            return image
+    
+    def _apply_white_balance(self, image: Image.Image) -> Image.Image:
+        """自动白平衡校正"""
+        try:
+            import cv2
+            import numpy as np
+            
+            # 转换为numpy数组
+            img_array = np.array(image)
+            if len(img_array.shape) == 3 and img_array.shape[2] >= 3:
+                # 计算各通道平均值
+                avg_b = np.mean(img_array[:, :, 2])  # PIL中是RGB，所以B是索引2
+                avg_g = np.mean(img_array[:, :, 1])
+                avg_r = np.mean(img_array[:, :, 0])
+                
+                # 计算灰度世界假设下的校正因子
+                avg_gray = (avg_r + avg_g + avg_b) / 3
+                
+                if avg_gray > 0:
+                    scale_r = avg_gray / avg_r if avg_r > 0 else 1.0
+                    scale_g = avg_gray / avg_g if avg_g > 0 else 1.0
+                    scale_b = avg_gray / avg_b if avg_b > 0 else 1.0
+                    
+                    # 限制校正幅度
+                    scale_r = np.clip(scale_r, 0.8, 1.2)
+                    scale_g = np.clip(scale_g, 0.8, 1.2)
+                    scale_b = np.clip(scale_b, 0.8, 1.2)
+                    
+                    # 应用校正
+                    img_array[:, :, 0] = np.clip(img_array[:, :, 0] * scale_r, 0, 255)
+                    img_array[:, :, 1] = np.clip(img_array[:, :, 1] * scale_g, 0, 255)
+                    img_array[:, :, 2] = np.clip(img_array[:, :, 2] * scale_b, 0, 255)
+                    
+                    return Image.fromarray(img_array.astype(np.uint8), mode=image.mode)
+            
+            return image
+            
+        except Exception:
+            return image
+    
+    def _apply_tone_mapping(self, image: Image.Image) -> Image.Image:
+        """色调映射优化"""
+        try:
+            import cv2
+            import numpy as np
+            
+            img_array = np.array(image)
+            if len(img_array.shape) == 3 and img_array.shape[2] >= 3:
+                # 转换为LAB色彩空间进行处理
+                lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+                l, a, b = cv2.split(lab)
+                
+                # 对L通道应用自适应直方图均衡化
+                clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+                l = clahe.apply(l)
+                
+                # 重新合并并转换回RGB
+                lab = cv2.merge([l, a, b])
+                rgb = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+                
+                return Image.fromarray(rgb, mode=image.mode)
+            
+            return image
+            
+        except Exception:
+            return image
+    
+    def _apply_detail_enhancement(self, image: Image.Image, features: dict) -> Image.Image:
+        """细节增强后处理"""
+        try:
+            from PIL import ImageFilter, ImageEnhance
+            import cv2
+            import numpy as np
+            
+            enhanced = image.copy()
+            edge_density = features.get('edge_density', 0)
+            
+            # 1. 自适应锐化
+            if edge_density > 0.15:
+                # 高边缘密度：轻微锐化
+                sharpness_factor = 1.1
+            elif edge_density > 0.08:
+                # 中等边缘密度：适度锐化
+                sharpness_factor = 1.2
+            else:
+                # 低边缘密度：较强锐化
+                sharpness_factor = 1.3
+            
+            enhancer = ImageEnhance.Sharpness(enhanced)
+            enhanced = enhancer.enhance(sharpness_factor)
+            
+            # 2. 边缘保护的细节增强
+            if edge_density > 0.1:
+                enhanced = self._apply_edge_preserving_enhancement(enhanced)
+            
+            # 3. 高频细节增强
+            enhanced = self._apply_high_frequency_enhancement(enhanced, edge_density)
+            
+            return enhanced
+            
+        except Exception:
+            return image
+    
+    def _apply_edge_preserving_enhancement(self, image: Image.Image) -> Image.Image:
+        """边缘保护的细节增强"""
+        try:
+            import cv2
+            import numpy as np
+            
+            img_array = np.array(image)
+            if len(img_array.shape) == 3:
+                # 使用双边滤波保护边缘的同时增强细节
+                enhanced = cv2.bilateralFilter(img_array, 9, 75, 75)
+                
+                # 计算细节层
+                detail = img_array.astype(np.float32) - enhanced.astype(np.float32)
+                
+                # 增强细节层
+                enhanced_detail = detail * 1.2
+                
+                # 合并
+                result = enhanced.astype(np.float32) + enhanced_detail
+                result = np.clip(result, 0, 255).astype(np.uint8)
+                
+                return Image.fromarray(result, mode=image.mode)
+            
+            return image
+            
+        except Exception:
+            return image
+    
+    def _apply_high_frequency_enhancement(self, image: Image.Image, edge_density: float) -> Image.Image:
+        """高频细节增强"""
+        try:
+            import cv2
+            import numpy as np
+            
+            img_array = np.array(image)
+            if len(img_array.shape) == 3:
+                # 转换为灰度进行高频分析
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+                
+                # 高斯模糊获取低频
+                low_freq = cv2.GaussianBlur(gray, (5, 5), 1.0)
+                
+                # 计算高频
+                high_freq = gray.astype(np.float32) - low_freq.astype(np.float32)
+                
+                # 根据边缘密度调整增强强度
+                enhancement_factor = 0.3 if edge_density > 0.15 else 0.5
+                
+                # 增强高频
+                enhanced_high_freq = high_freq * enhancement_factor
+                
+                # 应用到原图的每个通道
+                result = img_array.copy().astype(np.float32)
+                for i in range(3):
+                    result[:, :, i] += enhanced_high_freq
+                
+                result = np.clip(result, 0, 255).astype(np.uint8)
+                return Image.fromarray(result, mode=image.mode)
+            
+            return image
+            
+        except Exception:
+            return image
+    
+    def _detect_noise_increase(self, original: Image.Image, upscaled: Image.Image) -> bool:
+        """检测放大过程中是否产生了噪点增加"""
+        try:
+            import cv2
+            import numpy as np
+            
+            # 将图像调整到相同尺寸进行比较
+            original_resized = original.resize(upscaled.size, Image.Resampling.LANCZOS)
+            
+            # 转换为灰度
+            orig_gray = np.array(original_resized.convert('L'))
+            upsc_gray = np.array(upscaled.convert('L'))
+            
+            # 计算噪点水平（使用拉普拉斯方差）
+            orig_noise = cv2.Laplacian(orig_gray, cv2.CV_64F).var()
+            upsc_noise = cv2.Laplacian(upsc_gray, cv2.CV_64F).var()
+            
+            # 如果放大后噪点显著增加，返回True
+            noise_increase_ratio = upsc_noise / (orig_noise + 1e-6)
+            return noise_increase_ratio > 1.3
+            
+        except Exception:
+            return False
+    
+    def _apply_noise_reduction(self, image: Image.Image, features: dict) -> Image.Image:
+        """智能噪点抑制"""
+        try:
+            import cv2
+            import numpy as np
+            
+            img_array = np.array(image)
+            if len(img_array.shape) == 3:
+                # 使用非局部均值去噪
+                denoised = cv2.fastNlMeansDenoisingColored(img_array, None, 6, 6, 7, 21)
+                
+                # 保持边缘锐度
+                edge_density = features.get('edge_density', 0)
+                if edge_density > 0.1:
+                    # 高边缘密度时，混合原图以保持细节
+                    alpha = 0.7  # 去噪图像权重
+                    result = (alpha * denoised + (1 - alpha) * img_array).astype(np.uint8)
+                else:
+                    result = denoised
+                
+                return Image.fromarray(result, mode=image.mode)
+            
+            return image
+            
+        except Exception:
+            return image
+    
+    def _apply_tone_adjustment(self, image: Image.Image, features: dict) -> Image.Image:
+        """色调和亮度微调"""
+        try:
+            from PIL import ImageEnhance
+            import cv2
+            import numpy as np
+            
+            enhanced = image.copy()
+            
+            # 1. 自适应对比度调整
+            img_array = np.array(enhanced.convert('L'))
+            mean_brightness = np.mean(img_array)
+            
+            if mean_brightness < 100:  # 偏暗图像
+                # 轻微提升亮度和对比度
+                brightness_enhancer = ImageEnhance.Brightness(enhanced)
+                enhanced = brightness_enhancer.enhance(1.05)
+                
+                contrast_enhancer = ImageEnhance.Contrast(enhanced)
+                enhanced = contrast_enhancer.enhance(1.1)
+                
+            elif mean_brightness > 180:  # 偏亮图像
+                # 轻微降低亮度，增加对比度
+                brightness_enhancer = ImageEnhance.Brightness(enhanced)
+                enhanced = brightness_enhancer.enhance(0.98)
+                
+                contrast_enhancer = ImageEnhance.Contrast(enhanced)
+                enhanced = contrast_enhancer.enhance(1.05)
+            
+            else:  # 正常亮度
+                # 轻微增强对比度
+                contrast_enhancer = ImageEnhance.Contrast(enhanced)
+                enhanced = contrast_enhancer.enhance(1.03)
+            
+            # 2. 伽马校正（可选）
+            if features.get('complexity', 0) > 0.5:
+                enhanced = self._apply_gamma_correction(enhanced, mean_brightness)
+            
+            return enhanced
+            
+        except Exception:
+            return image
+    
+    def _apply_gamma_correction(self, image: Image.Image, mean_brightness: float) -> Image.Image:
+        """自适应伽马校正"""
+        try:
+            import numpy as np
+            
+            # 根据平均亮度确定伽马值
+            if mean_brightness < 100:
+                gamma = 0.9  # 提亮暗部
+            elif mean_brightness > 180:
+                gamma = 1.1  # 压暗亮部
+            else:
+                gamma = 1.0  # 无需调整
+            
+            if gamma != 1.0:
+                img_array = np.array(image).astype(np.float32) / 255.0
+                corrected = np.power(img_array, gamma)
+                corrected = (corrected * 255).astype(np.uint8)
+                return Image.fromarray(corrected, mode=image.mode)
+            
+            return image
+            
+        except Exception:
+            return image
+    
+    def _final_quality_check(self, enhanced: Image.Image, original: Image.Image, log_callback=None) -> Image.Image:
+        """最终质量验证和修正"""
+        try:
+            # 1. 尺寸验证
+            if enhanced.size != original.size and hasattr(self, 'target_scale'):
+                expected_size = (int(original.size[0] * self.target_scale), 
+                               int(original.size[1] * self.target_scale))
+                if enhanced.size != expected_size:
+                    if log_callback:
+                        log_callback(f"        📏 修正输出尺寸: {enhanced.size} -> {expected_size}")
+                    enhanced = enhanced.resize(expected_size, Image.Resampling.LANCZOS)
+            
+            # 2. 色彩模式验证
+            if enhanced.mode != original.mode and original.mode in ['RGB', 'RGBA', 'L']:
+                if log_callback:
+                    log_callback(f"        🎨 修正色彩模式: {enhanced.mode} -> {original.mode}")
+                enhanced = enhanced.convert(original.mode)
+            
+            # 3. 质量评估
+            quality_score = self._evaluate_quality(enhanced)
+            if log_callback:
+                log_callback(f"        📊 最终质量评分: {quality_score:.3f}")
+            
+            return enhanced
+            
+        except Exception as e:
+            if log_callback:
+                log_callback(f"        ⚠️ 质量检查失败: {str(e)}")
+            return enhanced
+    
+    def _evaluate_quality(self, image: Image.Image) -> float:
+        """评估单张图像质量"""
+        try:
+            import numpy as np
+            import cv2
+            
+            img_array = np.array(image)
+            if len(img_array.shape) == 3:
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = img_array
+            
+            scores = []
+            
+            # 1. 边缘清晰度评分 (0-10)
+            edges = cv2.Canny(gray, 50, 150)
+            edge_density = np.sum(edges > 0) / edges.size
+            edge_score = min(10.0, edge_density * 50)  # 归一化到0-10
+            scores.append(edge_score)
+            
+            # 2. 对比度评分 (0-10)
+            contrast = gray.std()
+            contrast_score = min(10.0, contrast / 25.5)  # 归一化到0-10
+            scores.append(contrast_score)
+            
+            # 3. 细节丰富度评分 (0-10)
+            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            detail_score = min(10.0, laplacian_var / 500)  # 归一化到0-10
+            scores.append(detail_score)
+            
+            # 4. 噪点控制评分 (0-10，噪点越少分数越高)
+            # 使用高频噪点检测
+            kernel = np.array([[-1,-1,-1],[-1,8,-1],[-1,-1,-1]])
+            noise_response = cv2.filter2D(gray, -1, kernel)
+            noise_level = np.std(noise_response)
+            noise_score = max(0.0, 10.0 - noise_level / 10)  # 噪点越少分数越高
+            scores.append(noise_score)
+            
+            # 综合评分
+            final_score = np.mean(scores)
+            return min(10.0, max(0.0, final_score))
+            
+        except Exception:
+            return 5.0  # 默认中等评分
     
     def _evaluate_upscale_quality(self, original: Image.Image, upscaled: Image.Image, log_callback=None) -> float:
         """评估高清化质量"""

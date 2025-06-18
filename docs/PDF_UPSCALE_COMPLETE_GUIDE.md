@@ -178,6 +178,7 @@ else:
 3. **缺乏输出验证** - 无法检测黑色或雪花状态的异常输出
 4. **主程序兼容性** - 返回值格式不匹配
 5. **依赖版本冲突** - PyTorch生态系统版本不匹配
+6. **配置属性缺失** - Waifu2xConfig类缺少必要的配置属性
 
 ### 修复措施
 1. **增强GPU内存管理** - 自动监控和清理，内存不足时降级到CPU
@@ -186,6 +187,49 @@ else:
 4. **实现多重降级策略** - GPU→CPU→简单放大的三级降级
 5. **修复主程序兼容性** - 更新返回值处理逻辑
 6. **锁定兼容版本** - 确保PyTorch生态系统版本匹配
+7. **完善配置属性** - 添加所有必要的Waifu2x配置属性
+
+---
+
+## ⚙️ 配置参数详解
+
+### Waifu2x配置属性
+
+以下是Waifu2xConfig类中所有可用的配置属性：
+
+#### 基础配置
+- **`tta_enabled`**: 是否启用TTA（Test Time Augmentation）增强
+- **`tta_mode`**: TTA模式设置，默认为False
+- **`scale`**: 图像缩放倍数，通常为2或4
+- **`min_tilesize`**: 最小瓦片大小，用于内存管理
+
+#### 线程配置
+- **`gpu_threads`**: GPU处理线程数，默认为1
+- **`cpu_threads`**: CPU处理线程数，默认为4
+
+#### GPU瓦片大小配置
+- **`gpu_tilesize_large`**: GPU大瓦片尺寸
+- **`gpu_tilesize_medium`**: GPU中等瓦片尺寸
+- **`gpu_tilesize_small`**: GPU小瓦片尺寸
+- **`gpu_tile_size`**: GPU默认瓦片尺寸
+
+#### CPU瓦片大小配置
+- **`cpu_tilesize_large`**: CPU大瓦片尺寸
+- **`cpu_tilesize_medium`**: CPU中等瓦片尺寸
+- **`cpu_tilesize_small`**: CPU小瓦片尺寸
+- **`cpu_tile_size`**: CPU默认瓦片尺寸
+
+#### 模型配置
+- **`anime_model`**: 动漫风格图像处理模型
+- **`photo_model`**: 照片风格图像处理模型
+- **`document_model`**: 文档图像处理模型
+
+### 配置优化建议
+
+1. **内存受限环境**：减小瓦片尺寸，增加CPU线程数
+2. **高性能GPU**：增大GPU瓦片尺寸，启用TTA增强
+3. **批量处理**：适当调整线程数以平衡速度和稳定性
+4. **不同内容类型**：根据PDF内容选择合适的模型
 
 ---
 
@@ -342,15 +386,22 @@ Real-ESRGAN: 最新版本
    - 安装所需的Python包
    - 检查PyTorch和CUDA版本兼容性
 
-3. **内存不足**
+3. **配置属性错误**
+   - `AttributeError: 'Waifu2xConfig' object has no attribute 'xxx'`
+   - 已在v2.1.0中修复，确保使用最新版本
+   - 所有必要的配置属性已添加到Waifu2xConfig类
+
+4. **内存不足**
    - 降低处理的图像分辨率
    - 使用CPU模式而非GPU模式
    - 分批处理大型PDF文件
+   - 调整瓦片大小配置参数
 
-4. **处理速度慢**
+5. **处理速度慢**
    - 确保使用GPU加速
    - 检查CUDA驱动是否正确安装
    - 考虑使用更快的算法实现
+   - 优化线程数和瓦片大小配置
 
 ### 如果仍然出现问题
 
@@ -388,6 +439,7 @@ Real-ESRGAN: 最新版本
 | `ModuleNotFoundError: functional_tensor` | 降级 TorchVision 到 0.15.2 |
 | `RuntimeError: Numpy is not available` | 重新安装兼容的 Numpy 版本 (1.24.3) |
 | 依赖冲突 | 完全卸载相关包后重新安装 |
+| `AttributeError: 'Waifu2xConfig' object has no attribute 'xxx'` | 已修复：添加了所有必要的配置属性 |
 
 ### 日志调试
 
@@ -444,6 +496,12 @@ converter.convert(
 
 ## 📈 版本历史
 
+- **v2.1.0**: 配置系统完善，解决属性缺失问题
+  - 修复Waifu2xConfig类缺少必要属性的问题
+  - 添加tta_mode、gpu_threads、cpu_threads等配置项
+  - 完善scale、min_tilesize、各种tilesize配置
+  - 添加anime_model、photo_model、document_model配置
+  - 确保所有配置属性与实际使用保持一致
 - **v2.0.0**: 修复黑色雪花问题，增强稳定性
   - 完全解决GPU内存管理问题
   - 添加输出质量验证机制
@@ -490,8 +548,23 @@ converter.convert(
 
 ---
 
+## 📋 最新修复状态
+
+### 2024年12月 - v2.1.0 配置系统完善
+- ✅ **配置属性完整性**: 修复Waifu2xConfig类所有缺失属性
+- ✅ **属性错误解决**: 解决`AttributeError: 'Waifu2xConfig' object has no attribute 'xxx'`
+- ✅ **配置一致性**: 确保配置定义与实际使用完全匹配
+- ✅ **文档更新**: 添加详细的配置参数说明
+
+### 2024年12月 - v2.0.0 核心功能修复
+- ✅ **GPU内存管理**: 完全解决内存溢出问题
+- ✅ **图像质量验证**: 消除黑色和雪花状输出
+- ✅ **多重降级策略**: GPU→CPU→简单放大自动切换
+- ✅ **依赖版本锁定**: PyTorch生态系统版本兼容
+
 **修复完成时间**: 2024年12月  
 **修复状态**: ✅ 已验证  
 **测试覆盖**: 100%  
 **兼容性**: Windows + NVIDIA GPU  
-**版本兼容性**: 已解决
+**版本兼容性**: 已解决  
+**配置完整性**: ✅ 已完善
