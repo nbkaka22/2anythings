@@ -18,12 +18,20 @@ import sys
 import numpy as np
 
 # 导入基类
-from converters.converter_interface import ConverterInterface, ConverterMetadata
-
-# 导入新的模块化组件
-from converters.image_processing_toolkit import ImageAnalyzer, ImageProcessingPipeline
-from converters.config_manager import get_config_manager, get_processing_config
-from converters.enhancement_plugins import get_plugin_manager
+try:
+    from .converter_interface import ConverterInterface, ConverterMetadata
+    from .image_processing_toolkit import ImageAnalyzer, ImageProcessingPipeline
+    from .config_manager import get_config_manager, get_processing_config
+    from .enhancement_plugins import get_plugin_manager
+except ImportError:
+    # 当作为插件动态加载时，使用绝对导入
+    import sys
+    import os
+    sys.path.append(os.path.dirname(__file__))
+    from converter_interface import ConverterInterface, ConverterMetadata
+    from image_processing_toolkit import ImageAnalyzer, ImageProcessingPipeline
+    from config_manager import get_config_manager, get_processing_config
+    from enhancement_plugins import get_plugin_manager
 
 logger = logging.getLogger('pdf_converter')
 
@@ -399,21 +407,18 @@ class PDFUpscaleConverter(ConverterInterface):
                 
                 # 智能格式选择
                 try:
-                    if hasattr(image, 'format') and image.format == 'JPEG':
-                        # 原图是JPEG，保持JPEG格式
-                        if upscaled_image.mode != 'RGB':
-                            upscaled_image = upscaled_image.convert('RGB')
-                        upscaled_image.save(output_buffer, format='JPEG', quality=95, optimize=True)
-                    else:
-                        # 其他格式使用PNG
-                        upscaled_image.save(output_buffer, format='PNG', optimize=True)
+                    # 使用智能输出优化
+                    optimized_bytes = self._optimize_output_quality(
+                        upscaled_image, image, log_callback
+                    )
+                    return optimized_bytes
                 except Exception as save_error:
-                    # 备选方案：强制转换为RGB并保存为JPEG
+                    # 备选方案：使用基础保存方法
                     if log_callback:
-                        log_callback(f"      🔧 格式转换失败，使用JPEG格式")
+                        log_callback(f"      🔧 智能优化失败，使用基础保存: {str(save_error)}")
                     if upscaled_image.mode != 'RGB':
                         upscaled_image = upscaled_image.convert('RGB')
-                    upscaled_image.save(output_buffer, format='JPEG', quality=95)
+                    upscaled_image.save(output_buffer, format='JPEG', quality=85, optimize=True)
                 
                 return output_buffer.getvalue()
             
@@ -2157,6 +2162,182 @@ class PDFUpscaleConverter(ConverterInterface):
             'batch_size': 4  # GPU批处理大小
         }
     
+    def _optimize_output_quality(self, upscaled_image, original_image, log_callback=None):
+        """智能输出质量优化"""
+        try:
+            config = self.config_manager.get_config().output_optimization
+            
+            # 计算图像复杂度
+            complexity = self._calculate_image_complexity(upscaled_image)
+            
+            # 确定最佳格式
+            best_format, best_quality = self._determine_optimal_format(
+                upscaled_image, original_image, complexity, config
+            )
+            
+            # 自适应质量调整
+            if config.adaptive_quality_enabled:
+                best_quality = self._adjust_quality_by_complexity(
+                    best_quality, complexity, config
+                )
+            
+            # 保存图像
+            output_buffer = io.BytesIO()
+            
+            if best_format == 'WEBP' and config.webp_enabled:
+                upscaled_image.save(
+                    output_buffer, 
+                    format='WEBP', 
+                    quality=best_quality,
+                    optimize=True,
+                    method=6  # 最佳压缩
+                )
+            elif best_format == 'JPEG':
+                if upscaled_image.mode != 'RGB':
+                    upscaled_image = upscaled_image.convert('RGB')
+                
+                save_kwargs = {
+                    'format': 'JPEG',
+                    'quality': best_quality,
+                    'optimize': True
+                }
+                
+                if config.enable_progressive_jpeg:
+                    save_kwargs['progressive'] = True
+                
+                upscaled_image.save(output_buffer, **save_kwargs)
+            else:  # PNG
+                upscaled_image.save(
+                    output_buffer, 
+                    format='PNG', 
+                    optimize=True,
+                    compress_level=config.png_compression_level
+                )
+            
+            # 检查文件大小
+            file_size_mb = len(output_buffer.getvalue()) / (1024 * 1024)
+            
+            if file_size_mb > config.max_file_size_mb and config.size_priority_mode:
+                # 如果文件过大，进行二次优化
+                return self._secondary_optimization(
+                    upscaled_image, config, file_size_mb, log_callback
+                )
+            
+            if log_callback:
+                log_callback(
+                    f"      📊 优化完成: {best_format}, 质量={best_quality}, "
+                    f"大小={file_size_mb:.2f}MB, 复杂度={complexity:.2f}"
+                )
+            
+            return output_buffer.getvalue()
+            
+        except Exception as e:
+            if log_callback:
+                log_callback(f"      ⚠️ 输出优化失败: {str(e)}")
+            raise
+    
+    def _calculate_image_complexity(self, image):
+        """计算图像复杂度"""
+        try:
+            import cv2
+            import numpy as np
+            
+            # 转换为灰度图
+            gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+            
+            # 计算边缘密度
+            edges = cv2.Canny(gray, 50, 150)
+            edge_density = np.sum(edges > 0) / edges.size
+            
+            # 计算纹理复杂度（使用标准差）
+            texture_complexity = np.std(gray) / 255.0
+            
+            # 综合复杂度分数
+            complexity = (edge_density * 0.6 + texture_complexity * 0.4)
+            
+            return min(complexity, 1.0)
+        except Exception:
+            return 0.5  # 默认中等复杂度
+    
+    def _determine_optimal_format(self, upscaled_image, original_image, complexity, config):
+        """确定最佳输出格式和质量"""
+        # 默认质量范围
+        min_quality, max_quality = config.jpeg_quality_range
+        
+        # 检查原始格式
+        original_format = getattr(original_image, 'format', 'UNKNOWN')
+        
+        if config.auto_format_selection:
+            # 智能格式选择
+            if config.webp_enabled and complexity > 0.7:
+                # 高复杂度图像使用WebP
+                return 'WEBP', config.webp_quality
+            elif original_format == 'JPEG' or upscaled_image.mode == 'RGB':
+                # JPEG适合照片类图像
+                quality = int(min_quality + (max_quality - min_quality) * config.quality_vs_size_balance)
+                return 'JPEG', quality
+            else:
+                # PNG适合图表、截图等
+                return 'PNG', None
+        else:
+            # 保持原始格式
+            if original_format == 'JPEG':
+                quality = int(min_quality + (max_quality - min_quality) * config.quality_vs_size_balance)
+                return 'JPEG', quality
+            else:
+                return 'PNG', None
+    
+    def _adjust_quality_by_complexity(self, base_quality, complexity, config):
+        """根据图像复杂度调整质量"""
+        if base_quality is None:
+            return None
+        
+        # 复杂度越高，可以适当降低质量而不影响视觉效果
+        if complexity > 0.8:
+            # 高复杂度：可以降低5-10%质量
+            adjustment = -5 - int(5 * (complexity - 0.8) / 0.2)
+        elif complexity < 0.3:
+            # 低复杂度：需要保持较高质量
+            adjustment = 5 + int(5 * (0.3 - complexity) / 0.3)
+        else:
+            # 中等复杂度：保持基础质量
+            adjustment = 0
+        
+        adjusted_quality = base_quality + adjustment
+        return max(config.jpeg_quality_range[0], min(config.jpeg_quality_range[1], adjusted_quality))
+    
+    def _secondary_optimization(self, upscaled_image, config, current_size_mb, log_callback=None):
+        """二次优化：当文件过大时进行额外压缩"""
+        target_size_mb = config.max_file_size_mb
+        size_ratio = target_size_mb / current_size_mb
+        
+        # 计算目标质量
+        min_quality, max_quality = config.jpeg_quality_range
+        target_quality = max(min_quality, int(max_quality * size_ratio * 0.9))
+        
+        output_buffer = io.BytesIO()
+        
+        if upscaled_image.mode != 'RGB':
+            upscaled_image = upscaled_image.convert('RGB')
+        
+        upscaled_image.save(
+            output_buffer,
+            format='JPEG',
+            quality=target_quality,
+            optimize=True,
+            progressive=config.enable_progressive_jpeg
+        )
+        
+        final_size_mb = len(output_buffer.getvalue()) / (1024 * 1024)
+        
+        if log_callback:
+            log_callback(
+                f"      🔄 二次优化: 质量={target_quality}, "
+                f"大小={final_size_mb:.2f}MB (目标: {target_size_mb}MB)"
+            )
+        
+        return output_buffer.getvalue()
+
     def cleanup(self):
         """清理临时文件"""
         for temp_file in self._temp_files:

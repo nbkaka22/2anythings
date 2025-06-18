@@ -5,8 +5,8 @@
 
 import json
 import os
-from typing import Dict, Any, Optional
-from dataclasses import dataclass, asdict
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 
@@ -129,17 +129,34 @@ class QualityAssessmentConfig:
     contrast_score_divisor: float = 25.5
     detail_score_divisor: float = 500.0
     noise_score_divisor: float = 10.0
-    
-    # 权重配置
     edge_weight: float = 0.3
     contrast_weight: float = 0.25
     detail_weight: float = 0.25
     noise_weight: float = 0.2
 
+@dataclass
+class OutputOptimizationConfig:
+    """输出优化配置"""
+    jpeg_quality_range: list = None
+    png_compression_level: int = 9
+    enable_progressive_jpeg: bool = True
+    max_file_size_mb: float = 5.0
+    quality_vs_size_balance: float = 0.8
+    adaptive_quality_enabled: bool = True
+    size_priority_mode: bool = False
+    webp_enabled: bool = False
+    webp_quality: int = 85
+    auto_format_selection: bool = True
+    
+    def __post_init__(self):
+        if self.jpeg_quality_range is None:
+            self.jpeg_quality_range = [80, 95]
+
 
 @dataclass
 class PostprocessingConfig:
     """后处理配置"""
+    enabled: bool = True
     color_enhancement: ColorEnhancementConfig = None
     noise_reduction: NoiseReductionConfig = None
     sharpening: SharpeningConfig = None
@@ -162,6 +179,7 @@ class ProcessingConfig:
     waifu2x: Waifu2xConfig = None
     quality_assessment: QualityAssessmentConfig = None
     postprocessing: PostprocessingConfig = None
+    output_optimization: OutputOptimizationConfig = None
     
     def __post_init__(self):
         if self.clahe is None:
@@ -178,6 +196,8 @@ class ProcessingConfig:
             self.quality_assessment = QualityAssessmentConfig()
         if self.postprocessing is None:
             self.postprocessing = PostprocessingConfig()
+        if self.output_optimization is None:
+            self.output_optimization = OutputOptimizationConfig()
 
 
 class ConfigManager:
@@ -257,6 +277,10 @@ class ConfigManager:
             print(f"重置配置失败: {e}")
             return False
     
+    def get_config(self) -> ProcessingConfig:
+        """获取当前配置"""
+        return self.load_config()
+    
     def get_config_for_method(self, method: str) -> Dict[str, Any]:
         """获取特定方法的配置"""
         config = self.load_config()
@@ -293,18 +317,31 @@ class ConfigManager:
             'noise_reduction': asdict(config.noise_reduction),
             'color_enhancement': asdict(config.color_enhancement),
             'waifu2x': asdict(config.waifu2x),
-            'quality_assessment': asdict(config.quality_assessment)
+            'quality_assessment': asdict(config.quality_assessment),
+            'postprocessing': asdict(config.postprocessing),
+            'output_optimization': asdict(config.output_optimization)
         }
     
     def _dict_to_config(self, config_dict: Dict[str, Any]) -> ProcessingConfig:
         """字典转配置对象"""
+        # 处理后处理配置的嵌套结构
+        postprocessing_dict = config_dict.get('postprocessing', {})
+        postprocessing_config = PostprocessingConfig(
+            enabled=postprocessing_dict.get('enabled', True),
+            color_enhancement=ColorEnhancementConfig(**postprocessing_dict.get('color_enhancement', {})),
+            noise_reduction=NoiseReductionConfig(**postprocessing_dict.get('noise_reduction', {})),
+            sharpening=SharpeningConfig(**postprocessing_dict.get('sharpening', {}))
+        )
+        
         return ProcessingConfig(
             clahe=CLAHEConfig(**config_dict.get('clahe', {})),
             sharpening=SharpeningConfig(**config_dict.get('sharpening', {})),
             noise_reduction=NoiseReductionConfig(**config_dict.get('noise_reduction', {})),
             color_enhancement=ColorEnhancementConfig(**config_dict.get('color_enhancement', {})),
             waifu2x=Waifu2xConfig(**config_dict.get('waifu2x', {})),
-            quality_assessment=QualityAssessmentConfig(**config_dict.get('quality_assessment', {}))
+            quality_assessment=QualityAssessmentConfig(**config_dict.get('quality_assessment', {})),
+            postprocessing=postprocessing_config,
+            output_optimization=OutputOptimizationConfig(**config_dict.get('output_optimization', {}))
         )
     
     def export_config(self, export_path: str) -> bool:

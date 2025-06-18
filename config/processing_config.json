@@ -103,5 +103,17 @@
     "contrast_weight": 0.25,
     "detail_weight": 0.25,
     "noise_weight": 0.2
+  },
+  "output_optimization": {
+    "jpeg_quality_range": [80, 95],
+    "png_compression_level": 9,
+    "enable_progressive_jpeg": true,
+    "max_file_size_mb": 5.0,
+    "quality_vs_size_balance": 0.8,
+    "adaptive_quality_enabled": true,
+    "size_priority_mode": false,
+    "webp_enabled": false,
+    "webp_quality": 85,
+    "auto_format_selection": true
   }
 }
