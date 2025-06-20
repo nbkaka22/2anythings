@@ -841,29 +841,51 @@ class PDFConverter:
                     self.log("使用OCR转换器处理扫描版PDF")
                     from converters.pdf_to_docx_ocr_converter import PDFToDocxOCRConverter
                     converter = PDFToDocxOCRConverter()
+                    
+                    if converter:
+                        self.log(f"找到转换器: {converter.name}")
+                        success = converter.convert(pdf_path, output_path)
+                        if success:
+                            self.log_success(f"转换完成: {base_name}.pdf -> {base_name}.docx")
+                            self.log(f"输出文件: {output_path}")
+                            # 清理临时文件
+                            if hasattr(converter, 'cleanup'):
+                                converter.cleanup()
+                            return output_path
+                        else:
+                            self.log_error("OCR转换器执行失败", None)
+                            raise Exception(f"OCR转换失败: {pdf_path}")
+                    else:
+                        self.log_error("OCR转换器初始化失败", None)
+                        raise Exception("OCR转换器初始化失败")
                 else:
                     # 使用标准转换器
                     self.log("使用标准PDF到DOCX转换器")
                     converter = self.converter_factory.get_converter('pdf', 'docx')
-                
-                if converter:
-                    self.log(f"找到转换器: {converter.name}")
-                    success = converter.convert(pdf_path, output_path)
-                    if success:
-                        self.log_success(f"转换完成: {base_name}.pdf -> {base_name}.docx")
-                        self.log(f"输出文件: {output_path}")
-                        # 清理临时文件
-                        if hasattr(converter, 'cleanup'):
-                            converter.cleanup()
-                        return output_path
+                    
+                    if converter:
+                        self.log(f"找到转换器: {converter.name}")
+                        success = converter.convert(pdf_path, output_path)
+                        if success:
+                            self.log_success(f"转换完成: {base_name}.pdf -> {base_name}.docx")
+                            self.log(f"输出文件: {output_path}")
+                            # 清理临时文件
+                            if hasattr(converter, 'cleanup'):
+                                converter.cleanup()
+                            return output_path
+                        else:
+                            self.log_error("标准转换器执行失败", None)
+                            raise Exception(f"标准转换失败: {pdf_path}")
                     else:
-                        self.log_error("转换器执行失败", None)
-                else:
-                    self.log_error("未找到支持PDF到DOCX转换的转换器", None)
+                        self.log_error("未找到支持PDF到DOCX转换的转换器", None)
+                        raise Exception("未找到支持PDF到DOCX转换的转换器")
+                        
             except Exception as e:
-                self.log_error(f"工厂模式转换出错: {e}", e)
-        
-        raise Exception("没有可用的PDF转DOCX转换器")
+                self.log_error(f"转换过程出错: {e}", e)
+                raise e
+        else:
+            self.log_error("转换器工厂未初始化", None)
+            raise Exception("转换器工厂未初始化")
     
     def _check_pdf_integrity(self, pdf_path):
         """检查PDF文件的完整性，特别是查找可能导致bandwriter错误的问题"""

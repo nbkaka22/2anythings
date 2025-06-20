@@ -5,6 +5,7 @@ from PIL import Image, ImageTk
 import os
 import io
 import threading
+from converters.pdf_text_remover import PDFTextRemover
 
 class PDFOperations:
     def __init__(self, parent_window):
@@ -15,6 +16,7 @@ class PDFOperations:
         self.selected_pages = set()
         self.ui_frame = None
         self.current_operation = "delete_pages"
+        self.text_remover = PDFTextRemover()
         
     def show_ui(self, parent_frame):
         """显示PDF操作界面"""
@@ -52,6 +54,8 @@ class PDFOperations:
         # 根据当前操作显示不同的UI
         if self.current_operation == "delete_pages":
             self.setup_delete_pages_ui()
+        elif self.current_operation == "remove_text":
+            self.setup_remove_text_ui()
         else:
             # 其他操作的占位符
             placeholder_label = ttk.Label(self.main_frame, 
@@ -539,3 +543,214 @@ class PDFOperations:
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         # 阻止事件继续传播
         return "break"
+    
+    def setup_remove_text_ui(self):
+        """设置文本删除功能的UI"""
+        # 主标题
+        title_label = ttk.Label(self.main_frame, text="PDF文本删除", font=("Segoe UI", 14, "bold"))
+        title_label.pack(pady=(0, 20))
+        
+        # 文件选择区域
+        file_frame = ttk.LabelFrame(self.main_frame, text="选择PDF文件", padding="15")
+        file_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        # 文件路径显示
+        path_frame = ttk.Frame(file_frame)
+        path_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(path_frame, text="文件路径:").pack(anchor=tk.W, pady=(0, 5))
+        self.text_file_path_var = tk.StringVar()
+        path_entry = ttk.Entry(path_frame, textvariable=self.text_file_path_var, state="readonly")
+        path_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        # 文件选择按钮
+        button_frame = ttk.Frame(file_frame)
+        button_frame.pack(fill=tk.X)
+        
+        ttk.Button(button_frame, text="选择PDF文件", command=self.browse_text_pdf_file).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 文本删除配置区域
+        config_frame = ttk.LabelFrame(self.main_frame, text="删除配置", padding="15")
+        config_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        # 目标文本输入
+        text_frame = ttk.Frame(config_frame)
+        text_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(text_frame, text="要删除的文本:").pack(anchor=tk.W, pady=(0, 5))
+        self.target_text_var = tk.StringVar()
+        text_entry = ttk.Entry(text_frame, textvariable=self.target_text_var, font=("Segoe UI", 10))
+        text_entry.pack(fill=tk.X, pady=(0, 10))
+        
+        # 选项设置
+        options_frame = ttk.Frame(config_frame)
+        options_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.case_sensitive_var = tk.BooleanVar()
+        ttk.Checkbutton(options_frame, text="区分大小写", variable=self.case_sensitive_var).pack(side=tk.LEFT, padx=(0, 20))
+        
+        self.whole_word_var = tk.BooleanVar()
+        ttk.Checkbutton(options_frame, text="完整单词匹配", variable=self.whole_word_var).pack(side=tk.LEFT)
+        
+        # 预览区域
+        preview_frame = ttk.LabelFrame(self.main_frame, text="文本查找预览", padding="15")
+        preview_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        # 查找按钮
+        find_frame = ttk.Frame(preview_frame)
+        find_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Button(find_frame, text="查找文本", command=self.find_target_text).pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.find_status_label = ttk.Label(find_frame, text="")
+        self.find_status_label.pack(side=tk.LEFT)
+        
+        # 结果显示
+        result_frame = ttk.Frame(preview_frame)
+        result_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建Treeview显示查找结果
+        columns = ("页码", "位置", "方法", "文本内容")
+        self.result_tree = ttk.Treeview(result_frame, columns=columns, show="headings", height=8)
+        
+        for col in columns:
+            self.result_tree.heading(col, text=col)
+            if col == "页码":
+                self.result_tree.column(col, width=60, anchor="center")
+            elif col == "位置":
+                self.result_tree.column(col, width=150, anchor="center")
+            elif col == "方法":
+                self.result_tree.column(col, width=80, anchor="center")
+            else:
+                self.result_tree.column(col, width=200)
+        
+        # 添加滚动条
+        tree_scrollbar = ttk.Scrollbar(result_frame, orient="vertical", command=self.result_tree.yview)
+        self.result_tree.configure(yscrollcommand=tree_scrollbar.set)
+        
+        self.result_tree.pack(side="left", fill="both", expand=True)
+        tree_scrollbar.pack(side="right", fill="y")
+        
+        # 操作按钮区域
+        action_frame = ttk.Frame(self.main_frame)
+        action_frame.pack(fill=tk.X)
+        
+        ttk.Button(action_frame, text="删除文本并保存", command=self.remove_text_and_save, 
+                  style="Convert.TButton").pack(anchor=tk.CENTER)
+    
+    def browse_text_pdf_file(self):
+        """浏览选择PDF文件（文本删除功能）"""
+        filetypes = [("PDF文件", "*.pdf"), ("所有文件", "*.*")]
+        file_path = filedialog.askopenfilename(filetypes=filetypes, title="选择PDF文件")
+        
+        if file_path:
+            self.text_file_path_var.set(file_path)
+            self.text_pdf_path = file_path
+            # 清空之前的查找结果
+            for item in self.result_tree.get_children():
+                self.result_tree.delete(item)
+            self.find_status_label.config(text="")
+    
+    def find_target_text(self):
+        """查找目标文本"""
+        if not hasattr(self, 'text_pdf_path') or not self.text_pdf_path:
+            messagebox.showwarning("警告", "请先选择PDF文件")
+            return
+        
+        target_text = self.target_text_var.get().strip()
+        if not target_text:
+            messagebox.showwarning("警告", "请输入要查找的文本")
+            return
+        
+        try:
+            self.find_status_label.config(text="正在查找...")
+            self.parent.update()
+            
+            # 清空之前的结果
+            for item in self.result_tree.get_children():
+                self.result_tree.delete(item)
+            
+            # 查找文本
+            results = self.text_remover.find_text_in_pdf(
+                self.text_pdf_path, 
+                target_text, 
+                self.case_sensitive_var.get()
+            )
+            
+            # 显示结果
+            if results:
+                for result in results:
+                    bbox_str = f"({result['bbox'][0]:.1f}, {result['bbox'][1]:.1f}, {result['bbox'][2]:.1f}, {result['bbox'][3]:.1f})"
+                    text_content = result.get('text', target_text)[:50] + ('...' if len(result.get('text', target_text)) > 50 else '')
+                    
+                    self.result_tree.insert("", "end", values=(
+                        result['page'],
+                        bbox_str,
+                        result['method'],
+                        text_content
+                    ))
+                
+                self.find_status_label.config(text=f"找到 {len(results)} 处匹配")
+            else:
+                self.find_status_label.config(text="未找到匹配的文本")
+                
+        except Exception as e:
+            messagebox.showerror("错误", f"查找文本失败: {str(e)}")
+            self.find_status_label.config(text="查找失败")
+    
+    def remove_text_and_save(self):
+        """删除文本并保存"""
+        if not hasattr(self, 'text_pdf_path') or not self.text_pdf_path:
+            messagebox.showwarning("警告", "请先选择PDF文件")
+            return
+        
+        target_text = self.target_text_var.get().strip()
+        if not target_text:
+            messagebox.showwarning("警告", "请输入要删除的文本")
+            return
+        
+        # 确认删除
+        result = messagebox.askyesno("确认删除", 
+                                   f"确定要删除PDF中的文本 '{target_text}' 吗？\n\n"
+                                   f"删除后将保存为新文件。")
+        
+        if not result:
+            return
+        
+        # 选择保存路径
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF文件", "*.pdf")],
+            title="保存删除文本后的PDF文件"
+        )
+        
+        if not save_path:
+            return
+        
+        try:
+            # 执行文本删除
+            success = self.text_remover.remove_text_from_pdf(
+                self.text_pdf_path,
+                save_path,
+                target_text,
+                self.case_sensitive_var.get(),
+                self.whole_word_var.get()
+            )
+            
+            if success:
+                messagebox.showinfo("成功", f"文本删除完成！\n\n"
+                                  f"保存路径: {save_path}")
+                
+                # 更新文件路径为新文件
+                self.text_pdf_path = save_path
+                self.text_file_path_var.set(save_path)
+                
+                # 清空查找结果
+                for item in self.result_tree.get_children():
+                    self.result_tree.delete(item)
+                self.find_status_label.config(text="")
+            else:
+                messagebox.showwarning("警告", "未找到要删除的文本或删除失败")
+                
+        except Exception as e:
+            messagebox.showerror("错误", f"删除文本失败: {str(e)}")

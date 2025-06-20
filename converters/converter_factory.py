@@ -8,7 +8,7 @@ import importlib
 import importlib.util
 import inspect
 from typing import Dict, List, Type, Optional, Any
-from .converter_interface import ConverterInterface, ConverterMetadata
+from converters.converter_interface import ConverterInterface, ConverterMetadata
 import logging
 
 logger = logging.getLogger('pdf_converter')
@@ -57,7 +57,7 @@ class ConverterFactory:
                 converter_name = metadata.name
                 
                 # 从插件管理器获取转换器类
-                from .plugin_manager import get_plugin_manager
+                from converters.plugin_manager import get_plugin_manager
                 plugin_manager = get_plugin_manager()
                 
                 if converter_name in plugin_manager.loaded_plugins:
@@ -373,20 +373,20 @@ class ConverterFactory:
         """注册内置转换器"""
         try:
             # 注册PDF到DOCX转换器
-            from .pdf_to_docx_converter import PDFToDocxConverter
+            from converters.pdf_to_docx_converter import PDFToDocxConverter
             self.register_converter(PDFToDocxConverter)
             
             # 注册PDF到PPT转换器
-            from .pdf_to_ppt_converter import PDFToPPTConverter
+            from converters.pdf_to_ppt_converter import PDFToPPTConverter
             self.register_converter(PDFToPPTConverter)
             
             # 注册Word到PPT转换器
-            from .word_to_ppt_converter import WordToPPTConverter
+            from converters.word_to_ppt_converter import WordToPPTConverter
             self.register_converter(WordToPPTConverter)
             
             # 注册PDF高清化转换器
             try:
-                from .pdf_upscale_converter import PDFUpscaleConverter
+                from converters.pdf_upscale_converter import PDFUpscaleConverter
                 self.register_converter(PDFUpscaleConverter)
                 logger.info("PDF高清化转换器注册成功")
             except ImportError as e:

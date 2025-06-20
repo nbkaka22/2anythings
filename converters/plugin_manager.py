@@ -12,7 +12,7 @@ from typing import Dict, List, Type, Optional
 import logging
 from pathlib import Path
 
-from .converter_interface import ConverterInterface, ConverterMetadata
+from converters.converter_interface import ConverterInterface, ConverterMetadata
 
 logger = logging.getLogger('pdf_converter')
 
@@ -149,7 +149,7 @@ class PluginManager:
             instance.cleanup()
             
             # 注册到转换器工厂
-            from .converter_factory import get_converter_factory
+            from converters.converter_factory import get_converter_factory
             factory = get_converter_factory()
             factory.register_converter(self.plugin_metadata[converter_name])
             
