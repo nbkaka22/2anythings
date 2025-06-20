@@ -25,12 +25,12 @@ from io import BytesIO
 import json
 
 # 导入新的改进组件
-from .ocr_parameter_adapter import OCRParameterAdapter
-from .ocr_health_checker import OCRHealthChecker
-from .performance_monitor import monitor_performance
-from .retry_manager import retry_ocr_init, retry_file_processing, CircuitBreaker
-from .enhanced_ocr_methods import EnhancedOCRMethods
-from .cache_manager import cache_manager
+from converters.ocr_parameter_adapter import OCRParameterAdapter
+from converters.ocr_health_checker import OCRHealthChecker
+from converters.performance_monitor import monitor_performance
+from converters.retry_manager import retry_ocr_init, retry_file_processing, CircuitBreaker
+from converters.enhanced_ocr_methods import EnhancedOCRMethods
+from converters.cache_manager import cache_manager
 from config.config_validator import config_validator
 
 # PaddleOCR导入（可选）
